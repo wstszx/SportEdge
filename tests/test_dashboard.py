@@ -72,6 +72,28 @@ def sample_records():
     ]
 
 
+def sample_shadow_events():
+    return [
+        {"event_type": "signal", "status": "candidate", "market_id": "m1"},
+        {
+            "event_type": "risk_decision",
+            "market_id": "m1",
+            "allowed": False,
+            "reasons": ["wide spread"],
+        },
+        {
+            "event_type": "shadow_fill",
+            "market_id": "m1",
+            "outcome_name": "Team A",
+            "token_id": "token-a",
+            "status": "partial",
+            "filled_notional": 5.0,
+            "unfilled_notional": 3.0,
+            "slippage": 0.02,
+        },
+    ]
+
+
 def test_latest_market_rows_returns_latest_snapshot_per_market_sorted_by_signal():
     rows = latest_market_rows(sample_snapshots())
 
@@ -99,6 +121,25 @@ def test_build_dashboard_state_combines_reports_quality_and_tables():
     assert len(state["settlements"]) == 1
 
 
+def test_build_dashboard_state_includes_shadow_report_and_tables():
+    state = build_dashboard_state(
+        sample_records(),
+        sample_snapshots(),
+        sample_shadow_events(),
+    )
+
+    assert state["shadow_report"]["candidate_count"] == 1
+    assert state["shadow_report"]["simulated_unfilled_notional"] == 3.0
+    assert state["shadow_exposure_by_market"] == [
+        {"market_id": "m1", "exposure": 5.0}
+    ]
+    assert state["shadow_exposure_by_outcome"] == [
+        {"market_outcome": "m1:Team A", "exposure": 5.0}
+    ]
+    assert state["shadow_risk_decisions"][0]["reasons"] == ["wide spread"]
+    assert state["shadow_fills"][0]["outcome_name"] == "Team A"
+
+
 def test_dashboard_ui_text_is_localized_to_chinese():
     assert UI_TEXT["app_title"] == "体育下注研究仪表盘"
     assert UI_TEXT["sidebar_help"] == "请先在命令行采集快照，然后刷新这个仪表盘。"
@@ -108,6 +149,12 @@ def test_dashboard_ui_text_is_localized_to_chinese():
     assert _label("markets_tab") == "市场"
     assert _label("paper_trades_tab") == "模拟交易"
     assert _label("quality_tab") == "数据质量"
+
+
+def test_dashboard_has_shadow_ui_labels():
+    assert _label("shadow_tab") == "影子交易"
+    assert _label("shadow_events_path") == "影子事件文件"
+    assert _label("shadow_quality_clean") == "影子交易数据质量当前无警告。"
 
 
 def test_dashboard_translates_status_reasons_sides_and_json_keys():

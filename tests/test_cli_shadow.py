@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from sports_edge_scanner.cli import build_parser
+from sports_edge_scanner.cli import build_parser, run_shadow_smoke, shadow_smoke_exit_code
 from sports_edge_scanner.core.fair import FairProbabilityBook
 from sports_edge_scanner.core.risk import RiskConfig
 from sports_edge_scanner.core.shadow_pipeline import run_shadow_scan
@@ -38,6 +38,38 @@ class FakeBookClient:
             asks=[OrderBookLevel(price=0.47, size=100.0)],
             timestamp="2026-05-10T00:00:00+00:00",
         )
+
+
+class EmptyMarketClient:
+    def fetch_markets(self, limit):
+        return []
+
+
+class NoTokenMarketClient:
+    def fetch_markets(self, limit):
+        market = FakeMarketClient().fetch_markets(limit)[0]
+        return [
+            Market(
+                id=market.id,
+                title=market.title,
+                slug=market.slug,
+                active=market.active,
+                closed=market.closed,
+                end_time=market.end_time,
+                liquidity=market.liquidity,
+                volume=market.volume,
+                outcomes=[
+                    MarketOutcome(name="Team A", price=0.46, token_id=None),
+                    MarketOutcome(name="Team B", price=0.54, token_id=None),
+                ],
+                source=market.source,
+            )
+        ]
+
+
+class FailingBookClient:
+    def fetch_orderbook(self, token_id):
+        raise RuntimeError("book unavailable")
 
 
 class SlippyBookClient:
@@ -85,6 +117,72 @@ def test_parser_supports_shadow_init_config():
     assert args.config == "custom_config.json"
     assert args.fair == "custom_fair.json"
     assert args.force is True
+
+
+def test_parser_supports_shadow_smoke():
+    parser = build_parser()
+
+    args = parser.parse_args(["shadow", "smoke", "--limit", "2", "--json"])
+
+    assert args.command == "shadow"
+    assert args.shadow_command == "smoke"
+    assert args.limit == 2
+    assert args.json is True
+
+
+def test_run_shadow_smoke_reports_success_with_fake_clients():
+    result = run_shadow_smoke(
+        market_client=FakeMarketClient(),
+        book_client=FakeBookClient(),
+        limit=2,
+    )
+
+    assert result["markets_found"] == 1
+    assert result["orderbooks_attempted"] == 2
+    assert result["orderbooks_succeeded"] == 2
+    assert result["orderbooks_failed"] == 0
+    assert result["ok"] is True
+    assert shadow_smoke_exit_code(result) == 0
+
+
+def test_run_shadow_smoke_fails_without_markets():
+    result = run_shadow_smoke(
+        market_client=EmptyMarketClient(),
+        book_client=FakeBookClient(),
+        limit=2,
+    )
+
+    assert result["ok"] is False
+    assert "no markets found" in result["warnings"]
+    assert shadow_smoke_exit_code(result) == 1
+
+
+def test_run_shadow_smoke_fails_without_orderbooks_to_check():
+    result = run_shadow_smoke(
+        market_client=NoTokenMarketClient(),
+        book_client=FakeBookClient(),
+        limit=2,
+    )
+
+    assert result["ok"] is False
+    assert result["orderbooks_attempted"] == 0
+    assert "no token ids found" in result["warnings"]
+    assert shadow_smoke_exit_code(result) == 1
+
+
+def test_run_shadow_smoke_fails_when_orderbook_fetches_fail():
+    result = run_shadow_smoke(
+        market_client=FakeMarketClient(),
+        book_client=FailingBookClient(),
+        limit=2,
+    )
+
+    assert result["ok"] is False
+    assert result["orderbooks_attempted"] == 2
+    assert result["orderbooks_succeeded"] == 0
+    assert result["orderbooks_failed"] == 2
+    assert "all orderbook fetches failed" in result["warnings"]
+    assert shadow_smoke_exit_code(result) == 1
 
 
 def test_run_shadow_scan_writes_signal_risk_order_and_fill_events(tmp_path):

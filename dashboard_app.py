@@ -6,6 +6,7 @@ from sports_edge_scanner.core.ledger import (
     paper_trade_record,
     read_records,
 )
+from sports_edge_scanner.core.events import read_events
 from sports_edge_scanner.core.snapshots import read_snapshots
 from sports_edge_scanner.dashboard_data import build_dashboard_state, price_history_for_market
 
@@ -23,6 +24,7 @@ UI_TEXT = {
     "data": "数据",
     "ledger_path": "交易记录文件",
     "snapshot_path": "市场快照文件",
+    "shadow_events_path": "影子事件文件",
     "sidebar_help": "请先在命令行采集快照，然后刷新这个仪表盘。",
     "realized_pnl": "已结算盈亏",
     "realized_roi": "已结算收益率",
@@ -34,6 +36,7 @@ UI_TEXT = {
     "paper_trades_tab": "模拟交易",
     "settlements_tab": "结算",
     "quality_tab": "数据质量",
+    "shadow_tab": "影子交易",
     "raw_report_tab": "原始报告",
     "latest_markets": "最新市场",
     "price_history": "价格历史",
@@ -62,6 +65,18 @@ UI_TEXT = {
     "report": "报告",
     "quality": "质量",
     "quality_ok": "当前文件没有数据质量告警。",
+    "shadow_overview": "影子交易概览",
+    "shadow_quality_clean": "影子交易数据质量当前无警告。",
+    "shadow_exposure_market": "按市场暴露",
+    "shadow_exposure_outcome": "按结果暴露",
+    "shadow_risk_decisions": "风控决策",
+    "shadow_fills": "影子成交",
+    "shadow_raw_report": "影子原始报告",
+    "accepted_orders": "通过订单",
+    "rejected_orders": "拒绝订单",
+    "filled_notional": "已成交名义金额",
+    "unfilled_notional": "未成交名义金额",
+    "average_slippage": "平均滑点",
     "lack_snapshots": "笔模拟交易缺少快照",
     "missing_yes_no": "条快照缺少是/否价格",
     "short_history": "快照历史少于 24 小时",
@@ -116,6 +131,36 @@ TABLE_LABELS = {
     "paper_trade_count": "模拟交易数",
     "paper_trades_missing_snapshots": "缺少快照的模拟交易",
     "markets": "市场列表",
+    "market_outcome": "市场/结果",
+    "exposure": "暴露",
+    "event_type": "事件类型",
+    "run_id": "运行 ID",
+    "schema_version": "结构版本",
+    "allowed": "是否允许",
+    "reasons": "原因",
+    "requested_notional": "请求名义金额",
+    "approved_notional": "批准名义金额",
+    "outcome_name": "结果",
+    "token_id": "Token ID",
+    "status": "状态",
+    "filled_notional": "已成交名义金额",
+    "unfilled_notional": "未成交名义金额",
+    "average_price": "平均价格",
+    "slippage": "滑点",
+    "order_id": "订单 ID",
+    "candidate_count": "候选数",
+    "accepted_order_count": "通过订单数",
+    "rejected_order_count": "拒绝订单数",
+    "orderbook_error_count": "订单簿错误数",
+    "simulated_notional_filled": "模拟已成交名义金额",
+    "simulated_unfilled_notional": "模拟未成交名义金额",
+    "fill_status_counts": "成交状态统计",
+    "rejections_by_reason": "拒绝原因统计",
+    "exposure_by_market": "按市场暴露",
+    "exposure_by_outcome": "按结果暴露",
+    "risk_decisions": "风控决策",
+    "fills": "成交",
+    "data_quality_warnings": "数据质量警告",
 }
 
 VALUE_LABELS = {
@@ -135,6 +180,15 @@ VALUE_LABELS = {
     "wide spread": "买卖价差过大",
     "market is closed": "市场已关闭",
     "no supplied fair probability clears edge threshold": "已提供的公平概率未超过优势阈值",
+    "partial": "部分成交",
+    "filled": "已成交",
+    "unfilled": "未成交",
+    "orderbook errors present": "存在订单簿错误",
+    "rejected orders present": "存在被拒绝订单",
+    "unfilled shadow orders present": "存在未完全成交的影子订单",
+    "candidates present but no fills": "存在候选信号但没有成交",
+    "slippage above maximum": "滑点超过上限",
+    "stale orderbook": "订单簿过期",
 }
 
 
@@ -184,10 +238,19 @@ def _percent(value: float | int | None) -> str:
     return f"{float(value):.2%}"
 
 
-def _load_state(ledger_path: Path, snapshot_path: Path) -> tuple[list[dict], list[dict], dict]:
+def _load_state(
+    ledger_path: Path,
+    snapshot_path: Path,
+    shadow_events_path: Path,
+) -> tuple[list[dict], list[dict], list[dict], dict]:
     records = read_records(ledger_path)
     snapshots = read_snapshots(snapshot_path)
-    return records, snapshots, build_dashboard_state(records, snapshots)
+    shadow_events = read_events(shadow_events_path)
+    return records, snapshots, shadow_events, build_dashboard_state(
+        records,
+        snapshots,
+        shadow_events,
+    )
 
 
 def _render_overview(state: dict) -> None:
@@ -313,6 +376,50 @@ def _render_quality(state: dict) -> None:
     st.dataframe(_display_rows(quality["markets"]), use_container_width=True, hide_index=True)
 
 
+def _render_shadow(state: dict) -> None:
+    report = state["shadow_report"]
+    st.subheader(_label("shadow_overview"))
+    columns = st.columns(6)
+    columns[0].metric(_label("candidates"), f"{report['candidate_count']:,}")
+    columns[1].metric(_label("accepted_orders"), f"{report['accepted_order_count']:,}")
+    columns[2].metric(_label("rejected_orders"), f"{report['rejected_order_count']:,}")
+    columns[3].metric(_label("filled_notional"), _money(report["simulated_notional_filled"]))
+    columns[4].metric(_label("unfilled_notional"), _money(report["simulated_unfilled_notional"]))
+    columns[5].metric(_label("average_slippage"), f"{report['average_slippage']:.4f}")
+
+    if report["data_quality_warnings"]:
+        st.warning(" | ".join(_translate_value(item) for item in report["data_quality_warnings"]))
+    else:
+        st.success(_label("shadow_quality_clean"))
+
+    st.subheader(_label("shadow_exposure_market"))
+    st.dataframe(
+        _display_rows(state["shadow_exposure_by_market"]),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.subheader(_label("shadow_exposure_outcome"))
+    st.dataframe(
+        _display_rows(state["shadow_exposure_by_outcome"]),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.subheader(_label("shadow_risk_decisions"))
+    st.dataframe(
+        _display_rows(state["shadow_risk_decisions"]),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.subheader(_label("shadow_fills"))
+    st.dataframe(
+        _display_rows(state["shadow_fills"]),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.subheader(_label("shadow_raw_report"))
+    st.json(_localize_json(report))
+
+
 def main() -> None:
     st.set_page_config(
         page_title=_label("app_title"),
@@ -341,17 +448,23 @@ def main() -> None:
         st.header(_label("data"))
         ledger_path = Path(st.text_input(_label("ledger_path"), "paper_trades.jsonl"))
         snapshot_path = Path(st.text_input(_label("snapshot_path"), "market_snapshots.jsonl"))
+        shadow_events_path = Path(st.text_input(_label("shadow_events_path"), "shadow_events.jsonl"))
         st.caption(_label("sidebar_help"))
 
-    records, snapshots, state = _load_state(ledger_path, snapshot_path)
+    records, snapshots, _shadow_events, state = _load_state(
+        ledger_path,
+        snapshot_path,
+        shadow_events_path,
+    )
     _render_overview(state)
 
-    markets_tab, trades_tab, settlements_tab, quality_tab, raw_tab = st.tabs(
+    markets_tab, trades_tab, settlements_tab, quality_tab, shadow_tab, raw_tab = st.tabs(
         [
             _label("markets_tab"),
             _label("paper_trades_tab"),
             _label("settlements_tab"),
             _label("quality_tab"),
+            _label("shadow_tab"),
             _label("raw_report_tab"),
         ]
     )
@@ -363,6 +476,8 @@ def main() -> None:
         _render_settlements(state, ledger_path)
     with quality_tab:
         _render_quality(state)
+    with shadow_tab:
+        _render_shadow(state)
     with raw_tab:
         st.subheader(_label("report"))
         st.json(_localize_json(state["report"]))

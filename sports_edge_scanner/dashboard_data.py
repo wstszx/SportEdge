@@ -1,6 +1,7 @@
 from typing import Any
 
 from sports_edge_scanner.core.reports import build_quality_report, build_report
+from sports_edge_scanner.core.shadow_reports import build_shadow_report
 
 
 def _record_type(record: dict[str, Any]) -> str:
@@ -100,14 +101,34 @@ def settlement_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def _dict_rows(mapping: dict[str, float], key_name: str) -> list[dict[str, object]]:
+    return [
+        {key_name: key, "exposure": value}
+        for key, value in sorted(mapping.items())
+    ]
+
+
 def build_dashboard_state(
     records: list[dict[str, Any]],
     snapshots: list[dict[str, Any]],
+    shadow_events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    shadow_report = build_shadow_report(shadow_events or [])
     return {
         "report": build_report(records, snapshots),
         "quality": build_quality_report(records, snapshots),
         "latest_markets": latest_market_rows(snapshots),
         "paper_trades": paper_trade_rows(records),
         "settlements": settlement_rows(records),
+        "shadow_report": shadow_report,
+        "shadow_exposure_by_market": _dict_rows(
+            shadow_report["exposure_by_market"],
+            "market_id",
+        ),
+        "shadow_exposure_by_outcome": _dict_rows(
+            shadow_report["exposure_by_outcome"],
+            "market_outcome",
+        ),
+        "shadow_risk_decisions": shadow_report["risk_decisions"],
+        "shadow_fills": shadow_report["fills"],
     }

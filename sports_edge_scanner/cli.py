@@ -400,6 +400,77 @@ def _shadow_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_shadow_smoke(market_client, book_client, limit: int) -> dict[str, object]:
+    warnings: list[str] = []
+    failures: list[dict[str, str]] = []
+    markets = market_client.fetch_markets(limit=limit)
+    attempted = 0
+    succeeded = 0
+
+    for market in markets:
+        for outcome in market.outcomes:
+            if not outcome.token_id:
+                continue
+            attempted += 1
+            try:
+                book_client.fetch_orderbook(outcome.token_id)
+                succeeded += 1
+            except Exception as exc:
+                failures.append(
+                    {
+                        "market_id": market.id,
+                        "token_id": outcome.token_id,
+                        "error": str(exc),
+                    }
+                )
+
+    if not markets:
+        warnings.append("no markets found")
+    if markets and attempted == 0:
+        warnings.append("no token ids found")
+    if attempted and succeeded == 0:
+        warnings.append("all orderbook fetches failed")
+    elif failures:
+        warnings.append("some orderbook fetches failed")
+
+    return {
+        "ok": bool(markets) and attempted > 0 and succeeded == attempted,
+        "markets_found": len(markets),
+        "orderbooks_attempted": attempted,
+        "orderbooks_succeeded": succeeded,
+        "orderbooks_failed": len(failures),
+        "warnings": warnings,
+        "failures": failures,
+    }
+
+
+def shadow_smoke_exit_code(result: dict[str, object]) -> int:
+    return 0 if result.get("ok") is True else 1
+
+
+def _shadow_smoke(args: argparse.Namespace) -> int:
+    try:
+        result = run_shadow_smoke(
+            market_client=PolymarketClient(),
+            book_client=PolymarketCLOBClient(),
+            limit=args.limit,
+        )
+    except Exception as exc:
+        print(f"shadow smoke failed: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(f"Markets found: {result['markets_found']}")
+        print(f"Orderbooks attempted: {result['orderbooks_attempted']}")
+        print(f"Orderbooks succeeded: {result['orderbooks_succeeded']}")
+        print(f"Orderbooks failed: {result['orderbooks_failed']}")
+        if result["warnings"]:
+            print(f"Warnings: {', '.join(result['warnings'])}")
+    return shadow_smoke_exit_code(result)
+
+
 def _shadow_init_config(args: argparse.Namespace) -> int:
     try:
         written = write_shadow_config_templates(
@@ -518,6 +589,14 @@ def build_parser() -> argparse.ArgumentParser:
     shadow_report.add_argument("--events", default="shadow_events.jsonl")
     shadow_report.add_argument("--json", action="store_true")
     shadow_report.set_defaults(func=_shadow_report)
+
+    shadow_smoke = shadow_subparsers.add_parser(
+        "smoke",
+        help="Check public Gamma and CLOB data availability without trading.",
+    )
+    shadow_smoke.add_argument("--limit", type=int, default=2)
+    shadow_smoke.add_argument("--json", action="store_true")
+    shadow_smoke.set_defaults(func=_shadow_smoke)
 
     shadow_init = shadow_subparsers.add_parser(
         "init-config",
