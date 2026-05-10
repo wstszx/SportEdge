@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from sports_edge_scanner.cli import build_parser, run_shadow_smoke, shadow_smoke_exit_code
+from sports_edge_scanner.core.auto_fair import AutoFairConfig
 from sports_edge_scanner.core.fair import FairProbabilityBook
 from sports_edge_scanner.core.risk import RiskConfig
 from sports_edge_scanner.core.shadow_pipeline import run_shadow_scan
@@ -210,6 +211,34 @@ def test_run_shadow_scan_writes_signal_risk_order_and_fill_events(tmp_path):
     assert "risk_decision" in event_types
     assert "shadow_order" in event_types
     assert "shadow_fill" in event_types
+
+
+def test_run_shadow_scan_without_manual_fair_emits_model_estimates(tmp_path):
+    events_path = tmp_path / "shadow_events.jsonl"
+
+    summary = run_shadow_scan(
+        market_client=FakeMarketClient(),
+        book_client=FakeBookClient(),
+        fair_book=None,
+        risk_config=RiskConfig(min_edge=0.03),
+        limit=5,
+        events_path=events_path,
+        run_id="run-1",
+        auto_fair_config=AutoFairConfig(min_confidence=0.75),
+        now=datetime(2026, 5, 10, 0, 0, tzinfo=timezone.utc),
+    )
+
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    estimate_events = [
+        event for event in events if event["event_type"] == "model_estimate"
+    ]
+
+    assert summary["model_estimate_count"] == 2
+    assert len(estimate_events) == 2
+    assert summary["candidate_count"] == 0
 
 
 def test_run_shadow_scan_logs_orderbooks_and_tracks_market_exposure(tmp_path):

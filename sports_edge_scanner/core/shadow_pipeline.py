@@ -2,6 +2,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from sports_edge_scanner.core.auto_fair import (
+    AutoFairConfig,
+    estimate_fair_probabilities_for_market,
+)
 from sports_edge_scanner.core.events import append_event, make_event
 from sports_edge_scanner.core.fair import FairProbabilityBook
 from sports_edge_scanner.core.risk import RiskConfig, evaluate_candidate_order
@@ -37,21 +41,25 @@ def _orderbook_age_seconds(orderbook: OrderBook, now: datetime) -> float | None:
 def run_shadow_scan(
     market_client: Any,
     book_client: Any,
-    fair_book: FairProbabilityBook,
+    fair_book: FairProbabilityBook | None,
     risk_config: RiskConfig,
     limit: int,
     events_path: Path,
     run_id: str,
     now: datetime | None = None,
+    auto_fair_config: AutoFairConfig | None = None,
 ) -> dict[str, object]:
     markets = market_client.fetch_markets(limit=limit)
     candidate_count = 0
     accepted_count = 0
     rejected_count = 0
+    model_estimate_count = 0
+    usable_model_estimate_count = 0
     order_index = 0
     market_exposure: dict[str, float] = {}
     total_exposure = 0.0
     current_time = now or datetime.now(timezone.utc)
+    effective_auto_fair_config = auto_fair_config or AutoFairConfig()
 
     for market in markets:
         books: dict[str, OrderBook] = {}
@@ -86,9 +94,28 @@ def run_shadow_scan(
                         ),
                     )
 
+        market_fair_book = fair_book
+        if market_fair_book is None:
+            market_fair_book = FairProbabilityBook()
+            estimates = estimate_fair_probabilities_for_market(
+                market,
+                books,
+                effective_auto_fair_config,
+            )
+            for estimate in estimates:
+                model_estimate_count += 1
+                if estimate.usable:
+                    usable_model_estimate_count += 1
+                    if estimate.probability is not None:
+                        market_fair_book.tokens[estimate.token_id] = estimate.probability
+                append_event(
+                    events_path,
+                    make_event("model_estimate", run_id, estimate.to_dict()),
+                )
+
         candidates = candidate_orders_for_market(
             market,
-            fair_book,
+            market_fair_book,
             books,
             min_edge=risk_config.min_edge,
             default_notional=risk_config.max_order_notional,
@@ -188,5 +215,7 @@ def run_shadow_scan(
         "candidate_count": candidate_count,
         "accepted_order_count": accepted_count,
         "rejected_order_count": rejected_count,
+        "model_estimate_count": model_estimate_count,
+        "usable_model_estimate_count": usable_model_estimate_count,
         "events_path": str(events_path),
     }
