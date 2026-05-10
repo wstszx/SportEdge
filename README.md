@@ -118,3 +118,27 @@ python -m sports_edge_scanner shadow init-config
 ```
 
 This writes `shadow_config.json` and `fair_probabilities.example.json` unless they already exist. Use `--force` only when you intentionally want to overwrite them.
+
+## Live Safety Core
+
+The `live` command group is a safety scaffold for future real execution. In this phase it still does not place real orders, cancel orders, sign payloads, load private keys, or manage wallets.
+
+Create the safe default config:
+
+```bash
+python -m sports_edge_scanner live init-config
+```
+
+Check the config:
+
+```bash
+python -m sports_edge_scanner live check-config --config live_config.json
+```
+
+Run an audited dry-run through the live safety guard:
+
+```bash
+python -m sports_edge_scanner live dry-run --events execution_events.jsonl --confirm-token confirm-live-dry-run
+```
+
+The default config keeps the kill switch enabled, so dry-run execution is rejected until the operator explicitly disables it in a local config file. Real venue execution requires a later authenticated adapter design.
