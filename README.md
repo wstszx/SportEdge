@@ -94,6 +94,16 @@ python -m sports_edge_scanner shadow scan --limit 20 --events shadow_events.json
 python -m sports_edge_scanner shadow report --events shadow_events.jsonl
 ```
 
+Run bounded unattended collection:
+
+```bash
+python -m sports_edge_scanner shadow watch --limit 20 --iterations 20 --interval-seconds 1800 --events shadow_events.jsonl
+```
+
+`shadow watch` runs repeated shadow scans with separate run ids, appends all
+events to the same log, records failed scan iterations as `shadow_scan_error`,
+and prints the final readiness verdict.
+
 When `--fair` is omitted, shadow mode automatically builds conservative fair
 probability estimates from public orderbook and market data. Estimates include
 source, confidence, and rejection reasons in the event log. Low-confidence

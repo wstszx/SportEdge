@@ -39,7 +39,19 @@ Each candidate is either rejected by risk controls or simulated as a limit order
 against observed orderbook depth. The scan writes append-only events to
 `shadow_events.jsonl`.
 
-## 4. Optional Manual Fair Override
+## 4. Run Bounded Shadow Watch
+
+```bash
+python -m sports_edge_scanner shadow watch --limit 20 --iterations 20 --interval-seconds 1800 --config shadow_config.json --events shadow_events.jsonl
+```
+
+Use watch mode to accumulate readiness evidence without manually rerunning
+`shadow scan`. Each iteration receives a separate run id and appends to the same
+event log. If an iteration fails, the command writes a `shadow_scan_error` event
+and continues. The final output includes completed, successful, and failed
+iterations plus the readiness verdict.
+
+## 5. Optional Manual Fair Override
 
 Copy `fair_probabilities.example.json` to `fair_probabilities.json`, then enter
 independent fair probabilities by market/outcome or token id only when running
@@ -51,7 +63,7 @@ output should influence real trading decisions.
 python -m sports_edge_scanner shadow scan --limit 20 --fair fair_probabilities.json --config shadow_config.json --events shadow_events.jsonl
 ```
 
-## 5. Review The Report
+## 6. Review The Report
 
 ```bash
 python -m sports_edge_scanner shadow report --events shadow_events.jsonl
@@ -70,7 +82,7 @@ The report also includes a readiness verdict:
 `READY` is not live-trading permission. It only means the shadow evidence is
 clean enough to consider the next safety design step.
 
-## 6. Open The Dashboard
+## 7. Open The Dashboard
 
 ```bash
 streamlit run dashboard_app.py
@@ -80,7 +92,7 @@ Set the ledger, market snapshot, and shadow events paths in the sidebar. Use the
 Shadow tab to inspect exposure, risk decisions, fills, warnings, and raw report
 JSON.
 
-## 7. Warnings That Make Results Unreliable
+## 8. Warnings That Make Results Unreliable
 
 - `orderbook errors present`: the run did not observe all candidate liquidity.
 - `rejected orders present`: risk controls blocked one or more candidates.
@@ -88,6 +100,7 @@ JSON.
 - `candidates present but no fills`: signals were generated but no simulated
   executions occurred.
 - `no usable model estimates`: automatic probabilities were too weak to trade.
+- `shadow scan errors present`: one or more watch iterations failed.
 - Stale orderbooks mean pricing may not represent current executable depth.
 - Fair probabilities without calibration or sample-size evidence should not be
   trusted.
