@@ -1,7 +1,14 @@
+import argparse
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
-from sports_edge_scanner.cli import build_parser, run_shadow_smoke, shadow_smoke_exit_code
+from sports_edge_scanner.cli import (
+    _shadow_report,
+    build_parser,
+    run_shadow_smoke,
+    shadow_smoke_exit_code,
+)
 from sports_edge_scanner.core.auto_fair import AutoFairConfig
 from sports_edge_scanner.core.fair import FairProbabilityBook
 from sports_edge_scanner.core.risk import RiskConfig
@@ -396,3 +403,17 @@ def test_run_shadow_scan_rejects_stale_orderbook(tmp_path):
     assert summary["accepted_order_count"] == 0
     assert summary["rejected_order_count"] == 1
     assert "stale orderbook" in risk_reasons
+
+
+def test_shadow_report_text_prints_readiness(tmp_path, capsys):
+    events_path = tmp_path / "shadow_events.jsonl"
+
+    exit_code = _shadow_report(
+        argparse.Namespace(events=str(events_path), json=False)
+    )
+
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Readiness: NOT READY" in output
+    assert "insufficient shadow runs" in output

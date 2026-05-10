@@ -422,6 +422,11 @@ def _shadow_report(args: argparse.Namespace) -> int:
         print(f"Rejected shadow orders: {report['rejected_order_count']}")
         print(f"Simulated notional filled: ${report['simulated_notional_filled']:,.2f}")
         print(f"Average slippage: {report['average_slippage']:.4f}")
+        readiness = report["readiness"]
+        readiness_label = "READY" if readiness["ready"] else "NOT READY"
+        print(f"Readiness: {readiness_label}")
+        if readiness["blockers"]:
+            print(f"Readiness blockers: {', '.join(readiness['blockers'])}")
     return 0
 
 
