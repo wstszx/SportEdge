@@ -172,6 +172,14 @@ def test_dashboard_has_control_ui_labels():
     assert _label("live_safety_status") == "实盘安全状态"
 
 
+def test_dashboard_has_strategy_diagnostics_labels():
+    assert _label("strategy_diagnostics") == "策略诊断"
+    assert _label("diagnostic_issues") == "诊断问题"
+    assert _label("diagnostic_next_actions") == "下一步建议"
+    assert _translate_value("needs_independent_signal") == "需要独立信号"
+    assert _translate_value("add independent signal source") == "接入独立信号来源"
+
+
 def test_dashboard_uses_current_streamlit_width_api():
     source = Path("dashboard_app.py").read_text(encoding="utf-8")
 

@@ -75,6 +75,10 @@ UI_TEXT = {
     "shadow_risk_decisions": "风控决策",
     "shadow_fills": "影子成交",
     "shadow_raw_report": "影子原始报告",
+    "strategy_diagnostics": "策略诊断",
+    "diagnostic_status": "诊断状态",
+    "diagnostic_issues": "诊断问题",
+    "diagnostic_next_actions": "下一步建议",
     "shadow_controls": "纸面采集控制",
     "shadow_limit": "市场数量",
     "shadow_iterations": "采集次数",
@@ -211,6 +215,22 @@ VALUE_LABELS = {
     "insufficient model estimates": "模型估算数量不足",
     "usable model estimate rate below minimum": "可用模型估算比例低于最低要求",
     "insufficient fills": "模拟成交数量不足",
+    "collecting_data": "正在积累数据",
+    "needs_independent_signal": "需要独立信号",
+    "needs_execution_samples": "需要执行样本",
+    "execution_quality_issue": "执行数据质量问题",
+    "healthy": "健康",
+    "insufficient sample size": "样本数量不足",
+    "execution data quality issue": "执行数据质量问题",
+    "conservative auto fair is not producing edge": "保守自动概率未产生优势",
+    "candidate signals have not produced simulated fills": "候选信号尚未产生模拟成交",
+    "readiness blockers remain": "仍存在准入阻断",
+    "collect more shadow runs": "继续积累影子运行样本",
+    "add independent signal source": "接入独立信号来源",
+    "continue shadow collection for execution samples": "继续采集执行样本",
+    "fix execution data quality before collecting more samples": "先修复执行数据质量再继续采样",
+    "improve market filters or model confidence": "改进市场过滤或模型置信度",
+    "review readiness blockers": "查看准入阻断原因",
 }
 
 
@@ -453,6 +473,26 @@ def _render_readiness(readiness: dict) -> None:
         )
 
 
+def _render_strategy_diagnostics(report: dict) -> None:
+    diagnostics = report.get("strategy_diagnostics") or {}
+    st.subheader(_label("strategy_diagnostics"))
+    st.metric(_label("diagnostic_status"), _translate_value(diagnostics.get("status")))
+
+    issues = diagnostics.get("issues") or []
+    if issues:
+        st.warning(
+            f"{_label('diagnostic_issues')}: "
+            + " | ".join(_translate_value(item) for item in issues)
+        )
+
+    next_actions = diagnostics.get("next_actions") or []
+    if next_actions:
+        st.info(
+            f"{_label('diagnostic_next_actions')}: "
+            + " | ".join(_translate_value(item) for item in next_actions)
+        )
+
+
 def _render_controls(
     state: dict,
     shadow_events_path: Path,
@@ -517,6 +557,7 @@ def _render_controls(
             st.error(_label("shadow_collection_failed"))
 
     _render_readiness(state["shadow_report"].get("readiness", {}))
+    _render_strategy_diagnostics(state["shadow_report"])
     st.subheader(_label("live_safety_status"))
     st.info(_label("live_safety_message"))
 
@@ -536,6 +577,8 @@ def _render_shadow(state: dict) -> None:
         st.warning(" | ".join(_translate_value(item) for item in report["data_quality_warnings"]))
     else:
         st.success(_label("shadow_quality_clean"))
+
+    _render_strategy_diagnostics(report)
 
     st.subheader(_label("shadow_exposure_market"))
     st.dataframe(

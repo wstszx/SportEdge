@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 output/
 .tmp-*.jsonl
+streamlit-app.*.log
 paper_trades.jsonl
 market_snapshots.jsonl
 shadow_events.jsonl
