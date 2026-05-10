@@ -351,7 +351,7 @@ def _render_overview(state: dict) -> None:
 def _render_markets(state: dict, snapshots: list[dict]) -> None:
     st.subheader(_label("latest_markets"))
     latest_markets = state["latest_markets"]
-    st.dataframe(_display_rows(latest_markets), use_container_width=True, hide_index=True)
+    st.dataframe(_display_rows(latest_markets), width="stretch", hide_index=True)
 
     if not latest_markets:
         st.info(_label("no_markets"))
@@ -375,14 +375,14 @@ def _render_markets(state: dict, snapshots: list[dict]) -> None:
         chart_history,
         x="时间",
         y=["是价格", "否价格"],
-        use_container_width=True,
+        width="stretch",
     )
-    st.dataframe(_display_rows(history), use_container_width=True, hide_index=True)
+    st.dataframe(_display_rows(history), width="stretch", hide_index=True)
 
 
 def _render_paper_trades(state: dict, ledger_path: Path) -> None:
     st.subheader(_label("paper_trades"))
-    st.dataframe(_display_rows(state["paper_trades"]), use_container_width=True, hide_index=True)
+    st.dataframe(_display_rows(state["paper_trades"]), width="stretch", hide_index=True)
 
     with st.form("add-paper-trade", clear_on_submit=True):
         st.caption(_label("add_trade_caption"))
@@ -409,7 +409,7 @@ def _render_paper_trades(state: dict, ledger_path: Path) -> None:
 
 def _render_settlements(state: dict, ledger_path: Path) -> None:
     st.subheader(_label("settlements"))
-    st.dataframe(_display_rows(state["settlements"]), use_container_width=True, hide_index=True)
+    st.dataframe(_display_rows(state["settlements"]), width="stretch", hide_index=True)
 
     with st.form("add-settlement", clear_on_submit=True):
         st.caption(_label("add_settlement_caption"))
@@ -439,7 +439,7 @@ def _render_quality(state: dict) -> None:
     columns[2].metric(_label("candidates"), f"{quality['candidate_snapshot_count']:,}")
     columns[3].metric(_label("missing_prices"), f"{quality['missing_price_snapshot_count']:,}")
     columns[4].metric(_label("unmatched_trades"), f"{quality['paper_trades_missing_snapshots']:,}")
-    st.dataframe(_display_rows(quality["markets"]), use_container_width=True, hide_index=True)
+    st.dataframe(_display_rows(quality["markets"]), width="stretch", hide_index=True)
 
 
 def _render_readiness(readiness: dict) -> None:
@@ -540,25 +540,25 @@ def _render_shadow(state: dict) -> None:
     st.subheader(_label("shadow_exposure_market"))
     st.dataframe(
         _display_rows(state["shadow_exposure_by_market"]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     st.subheader(_label("shadow_exposure_outcome"))
     st.dataframe(
         _display_rows(state["shadow_exposure_by_outcome"]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     st.subheader(_label("shadow_risk_decisions"))
     st.dataframe(
         _display_rows(state["shadow_risk_decisions"]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     st.subheader(_label("shadow_fills"))
     st.dataframe(
         _display_rows(state["shadow_fills"]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     st.subheader(_label("shadow_raw_report"))

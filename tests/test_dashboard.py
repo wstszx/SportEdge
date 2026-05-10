@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from dashboard_app import (
     UI_TEXT,
@@ -169,6 +170,13 @@ def test_dashboard_has_control_ui_labels():
     assert _label("run_shadow_collection") == "运行纸面采集"
     assert _label("run_quick_shadow_scan") == "快速扫描一次"
     assert _label("live_safety_status") == "实盘安全状态"
+
+
+def test_dashboard_uses_current_streamlit_width_api():
+    source = Path("dashboard_app.py").read_text(encoding="utf-8")
+
+    assert "use_container_width" not in source
+    assert 'width="stretch"' in source
 
 
 def test_dashboard_translates_status_reasons_sides_and_json_keys():
