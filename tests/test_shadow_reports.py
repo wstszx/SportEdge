@@ -87,3 +87,17 @@ def test_shadow_report_counts_model_estimates_and_reasons():
     assert report["unusable_model_estimate_count"] == 1
     assert report["model_rejections_by_reason"]["display price only"] == 1
     assert report["model_rejections_by_reason"]["low liquidity"] == 1
+
+
+def test_shadow_report_warns_when_auto_estimates_are_all_unusable():
+    report = build_shadow_report(
+        [
+            {
+                "event_type": "model_estimate",
+                "usable": False,
+                "reasons": ["wide spread"],
+            }
+        ]
+    )
+
+    assert "no usable model estimates" in report["data_quality_warnings"]

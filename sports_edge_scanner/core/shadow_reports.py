@@ -13,6 +13,8 @@ def _warnings(state: dict[str, Any]) -> list[str]:
         warnings.append("unfilled shadow orders present")
     if state["candidate_count"] and not state["simulated_notional_filled"]:
         warnings.append("candidates present but no fills")
+    if state["model_estimate_count"] and not state["usable_model_estimate_count"]:
+        warnings.append("no usable model estimates")
     return warnings
 
 
