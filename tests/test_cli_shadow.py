@@ -5,6 +5,7 @@ from pathlib import Path
 
 from sports_edge_scanner.cli import (
     _shadow_report,
+    _shadow_watch,
     build_parser,
     run_shadow_smoke,
     shadow_smoke_exit_code,
@@ -158,6 +159,35 @@ def test_parser_supports_shadow_smoke():
     assert args.shadow_command == "smoke"
     assert args.limit == 2
     assert args.json is True
+
+
+def test_parser_supports_shadow_watch():
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "shadow",
+            "watch",
+            "--limit",
+            "5",
+            "--iterations",
+            "2",
+            "--interval-seconds",
+            "0",
+            "--events",
+            "shadow.jsonl",
+            "--auto-fair-min-confidence",
+            "0.8",
+        ]
+    )
+
+    assert args.command == "shadow"
+    assert args.shadow_command == "watch"
+    assert args.limit == 5
+    assert args.iterations == 2
+    assert args.interval_seconds == 0
+    assert args.events == "shadow.jsonl"
+    assert args.auto_fair_min_confidence == 0.8
 
 
 def test_run_shadow_smoke_reports_success_with_fake_clients():
@@ -417,3 +447,37 @@ def test_shadow_report_text_prints_readiness(tmp_path, capsys):
     assert exit_code == 0
     assert "Readiness: NOT READY" in output
     assert "insufficient shadow runs" in output
+
+
+def test_shadow_watch_text_prints_summary_and_readiness(monkeypatch, tmp_path, capsys):
+    events_path = tmp_path / "shadow_events.jsonl"
+
+    monkeypatch.setattr(
+        "sports_edge_scanner.cli.PolymarketClient",
+        lambda: FakeMarketClient(),
+    )
+    monkeypatch.setattr(
+        "sports_edge_scanner.cli.PolymarketCLOBClient",
+        lambda: FakeBookClient(),
+    )
+
+    exit_code = _shadow_watch(
+        argparse.Namespace(
+            limit=1,
+            iterations=1,
+            interval_seconds=0.0,
+            fair="",
+            config="",
+            events=str(events_path),
+            auto_fair_min_confidence=0.75,
+            json=False,
+        )
+    )
+
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Completed iterations: 1" in output
+    assert "Successful iterations: 1" in output
+    assert "Failed iterations: 0" in output
+    assert "Readiness: NOT READY" in output
