@@ -2,6 +2,7 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 from uuid import uuid4
@@ -9,6 +10,15 @@ from uuid import uuid4
 from sports_edge_scanner.connectors.polymarket import PolymarketClient
 from sports_edge_scanner.connectors.polymarket_clob import PolymarketCLOBClient
 from sports_edge_scanner.core.events import read_events
+from sports_edge_scanner.core.execution import (
+    DryRunExecutionClient,
+    ExecutionOrder,
+    LiveModeConfig,
+    LiveModeGuard,
+    load_live_mode_config,
+    run_dry_run_execution,
+    write_live_config_template,
+)
 from sports_edge_scanner.core.fair import FairProbabilityBook, load_fair_probability_book
 from sports_edge_scanner.core.ledger import (
     append_record,
@@ -29,7 +39,7 @@ from sports_edge_scanner.core.snapshots import (
     read_snapshots,
     run_snapshot_watch,
 )
-from sports_edge_scanner.models import Market, Signal
+from sports_edge_scanner.models import Market, RiskDecision, Signal
 
 
 @dataclass(frozen=True)
@@ -487,6 +497,84 @@ def _shadow_init_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_live_config(path_value: str) -> LiveModeConfig:
+    if not path_value:
+        return LiveModeConfig()
+    return load_live_mode_config(Path(path_value))
+
+
+def _sample_execution_order() -> ExecutionOrder:
+    return ExecutionOrder(
+        client_order_id=str(uuid4()),
+        market_id="dry-run-market",
+        market_slug="dry-run-market",
+        outcome_name="DRY_RUN",
+        token_id="dry-run-token",
+        side="BUY",
+        order_type="LIMIT",
+        limit_price=0.5,
+        notional=1.0,
+        time_in_force="IOC",
+        source_signal_id="manual-dry-run",
+        created_at=datetime.now(timezone.utc).isoformat(),
+        venue="polymarket",
+    )
+
+
+def _live_init_config(args: argparse.Namespace) -> int:
+    try:
+        path = write_live_config_template(Path(args.config), force=args.force)
+    except FileExistsError as exc:
+        print(f"live init-config failed: {exc}", file=sys.stderr)
+        return 2
+    print(f"wrote {path}")
+    return 0
+
+
+def _live_check_config(args: argparse.Namespace) -> int:
+    try:
+        config = load_live_mode_config(Path(args.config))
+    except Exception as exc:
+        print(f"live check-config failed: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(config.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(f"Mode: {config.mode}")
+        print(f"Live enabled: {config.live_enabled}")
+        print(f"Kill switch enabled: {config.kill_switch_enabled}")
+    return 1 if config.kill_switch_enabled or config.mode != "dry_run" else 0
+
+
+def _live_dry_run(args: argparse.Namespace) -> int:
+    risk_decision = RiskDecision(
+        allowed=True,
+        reasons=["allowed"],
+        requested_notional=1.0,
+        approved_notional=1.0,
+    )
+    try:
+        result = run_dry_run_execution(
+            execution_client=DryRunExecutionClient(),
+            guard=LiveModeGuard(_load_live_config(args.config)),
+            order=_sample_execution_order(),
+            risk_decision=risk_decision,
+            events_path=Path(args.events),
+            run_id=str(uuid4()),
+            confirmation_token=args.confirm_token,
+        )
+    except Exception as exc:
+        print(f"live dry-run failed: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(f"Status: {result.status}")
+        print(f"Message: {result.message}")
+        print(f"Events: {args.events}")
+    return 0 if result.status == "dry_run_accepted" else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sports_edge_scanner",
@@ -606,6 +694,35 @@ def build_parser() -> argparse.ArgumentParser:
     shadow_init.add_argument("--fair", default="fair_probabilities.example.json")
     shadow_init.add_argument("--force", action="store_true")
     shadow_init.set_defaults(func=_shadow_init_config)
+
+    live = subparsers.add_parser("live", help="Inspect live-trading safety controls.")
+    live_subparsers = live.add_subparsers(dest="live_command", required=True)
+
+    live_init = live_subparsers.add_parser(
+        "init-config",
+        help="Write a safe live-mode config template.",
+    )
+    live_init.add_argument("--config", default="live_config.json")
+    live_init.add_argument("--force", action="store_true")
+    live_init.set_defaults(func=_live_init_config)
+
+    live_check = live_subparsers.add_parser(
+        "check-config",
+        help="Check whether live-mode config is safely gated.",
+    )
+    live_check.add_argument("--config", default="live_config.json")
+    live_check.add_argument("--json", action="store_true")
+    live_check.set_defaults(func=_live_check_config)
+
+    live_dry_run = live_subparsers.add_parser(
+        "dry-run",
+        help="Run an audited dry-run through the live safety guard.",
+    )
+    live_dry_run.add_argument("--config", default="")
+    live_dry_run.add_argument("--events", default="execution_events.jsonl")
+    live_dry_run.add_argument("--confirm-token", default="")
+    live_dry_run.add_argument("--json", action="store_true")
+    live_dry_run.set_defaults(func=_live_dry_run)
 
     return parser
 

@@ -1,5 +1,6 @@
 import json
 
+from sports_edge_scanner.cli import build_parser, main
 from sports_edge_scanner.core.events import read_events
 from sports_edge_scanner.core.execution import (
     DryRunExecutionClient,
@@ -98,3 +99,51 @@ def test_run_dry_run_execution_writes_rejection_event(tmp_path):
         "execution_rejected",
     ]
     assert "kill switch enabled" in events[1]["reasons"]
+
+
+def test_parser_supports_live_commands():
+    parser = build_parser()
+
+    init_args = parser.parse_args(["live", "init-config", "--config", "live.json"])
+    check_args = parser.parse_args(["live", "check-config", "--config", "live.json"])
+    dry_args = parser.parse_args(
+        [
+            "live",
+            "dry-run",
+            "--events",
+            "execution.jsonl",
+            "--confirm-token",
+            "confirm-live-dry-run",
+        ]
+    )
+
+    assert init_args.command == "live"
+    assert init_args.live_command == "init-config"
+    assert check_args.live_command == "check-config"
+    assert dry_args.live_command == "dry-run"
+
+
+def test_live_init_and_check_config_commands(tmp_path):
+    config_path = tmp_path / "live_config.json"
+
+    assert main(["live", "init-config", "--config", str(config_path)]) == 0
+    assert main(["live", "check-config", "--config", str(config_path)]) == 1
+
+
+def test_live_dry_run_command_writes_rejection_events(tmp_path):
+    events_path = tmp_path / "execution_events.jsonl"
+
+    exit_code = main(
+        [
+            "live",
+            "dry-run",
+            "--events",
+            str(events_path),
+            "--confirm-token",
+            "confirm-live-dry-run",
+        ]
+    )
+
+    events = read_events(events_path)
+    assert exit_code == 1
+    assert "execution_rejected" in [event["event_type"] for event in events]
