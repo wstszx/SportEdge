@@ -62,6 +62,14 @@ Review model estimate count, usable and unusable estimates, candidate count,
 accepted and rejected shadow orders, filled and unfilled notional, exposure by
 market, exposure by outcome, average slippage, and data quality warnings.
 
+The report also includes a readiness verdict:
+
+- `READY`: paper evidence meets the configured gate for the next design review.
+- `NOT READY`: blockers explain what evidence is missing or unreliable.
+
+`READY` is not live-trading permission. It only means the shadow evidence is
+clean enough to consider the next safety design step.
+
 ## 6. Open The Dashboard
 
 ```bash
@@ -83,6 +91,8 @@ JSON.
 - Stale orderbooks mean pricing may not represent current executable depth.
 - Fair probabilities without calibration or sample-size evidence should not be
   trusted.
+- A `READY` readiness verdict is only a review gate. It does not override live
+  safety controls.
 
 Do not use shadow results as production evidence when warnings are present,
 when fills are missing, when public API smoke checks fail, or when fair

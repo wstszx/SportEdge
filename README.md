@@ -118,7 +118,12 @@ Manual fair probability files are an advanced override for controlled tests:
 python -m sports_edge_scanner shadow scan --limit 20 --fair fair_probabilities.json --events shadow_events.jsonl
 ```
 
-Every candidate is either rejected with explicit risk reasons or converted into a simulated limit order and fill record. Shadow results are not live fills and should be treated as research evidence only.
+Every candidate is either rejected with explicit risk reasons or converted into
+a simulated limit order and fill record. The report also includes an automatic
+readiness verdict with blockers and thresholds. `READY` means the paper evidence
+is adequate for the next design review; it is not permission to trade live.
+Shadow results are not live fills and should be treated as research evidence
+only.
 
 Create safe starter files:
 
