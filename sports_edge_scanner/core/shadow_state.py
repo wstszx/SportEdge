@@ -18,8 +18,12 @@ def build_shadow_state(events: list[dict[str, Any]]) -> dict[str, Any]:
     unfilled_notional = 0.0
     slippages: list[float] = []
     risk_decisions: list[dict[str, Any]] = []
+    run_ids: set[str] = set()
 
     for event in events:
+        run_id = str(event.get("run_id") or "")
+        if run_id:
+            run_ids.add(run_id)
         event_type = event.get("event_type")
         if event_type == "signal" and event.get("status") == "candidate":
             candidate_count += 1
@@ -68,6 +72,8 @@ def build_shadow_state(events: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "candidate_count": candidate_count,
+        "run_count": len(run_ids),
+        "run_ids": sorted(run_ids),
         "accepted_order_count": accepted_order_count,
         "rejected_order_count": rejected_order_count,
         "orderbook_error_count": orderbook_error_count,

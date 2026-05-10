@@ -47,3 +47,18 @@ def test_build_shadow_state_replays_fills_rejections_and_exposure():
     assert state["exposure_by_outcome"] == {"m1:Team A": 6.0}
     assert state["fill_status_counts"] == {"partial": 1}
     assert state["fills"][0]["outcome_name"] == "Team A"
+
+
+def test_build_shadow_state_counts_distinct_run_ids():
+    events = [
+        {"event_type": "model_estimate", "run_id": "run-2", "usable": True},
+        {"event_type": "signal", "run_id": "run-1", "status": "candidate"},
+        {"event_type": "shadow_fill", "run_id": "run-1", "status": "full"},
+        {"event_type": "orderbook_error", "run_id": ""},
+        {"event_type": "risk_decision"},
+    ]
+
+    state = build_shadow_state(events)
+
+    assert state["run_count"] == 2
+    assert state["run_ids"] == ["run-1", "run-2"]
