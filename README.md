@@ -1,22 +1,20 @@
 # Sports Edge Scanner
 
-Sports Edge Scanner is a research-only CLI for scanning public prediction-market data, estimating break-even probabilities, flagging risk-aware candidates, and recording paper trades.
+Sports Edge Scanner is a research-only local app for scanning public prediction-market data, estimating break-even probabilities, flagging risk-aware candidates, and recording paper trades.
 
 It does not place real bets, manage wallets, bypass platform restrictions, or claim that positive EV guarantees profit. Treat every signal as a hypothesis that needs validation through closing-line value, calibration, drawdown, and enough sample size.
 
 ## Usage
 
+Start here:
+
 ```bash
-python -m sports_edge_scanner scan --limit 20
-python -m sports_edge_scanner scan --limit 20 --json
-python -m sports_edge_scanner scan --limit 20 --fair YES=0.55
-python -m sports_edge_scanner paper add --market "Example market" --side YES --price 0.47 --size 10 --note "tracking candidate"
-python -m sports_edge_scanner paper settle --market "Example market" --market-id "0xabc..." --winning-side YES --note "resolved"
-python -m sports_edge_scanner snapshot collect --limit 50
-python -m sports_edge_scanner snapshot watch --limit 50 --iterations 48 --interval-seconds 1800
-python -m sports_edge_scanner quality
-python -m sports_edge_scanner report
+python -m sports_edge_scanner app
 ```
+
+Use the frontend Control tab to configure and run paper/shadow collection,
+quick scans, and readiness review. Lower-level CLI commands still exist for
+tests and automation, but the normal operator workflow is the app.
 
 ## What The Scanner Reports
 
@@ -81,25 +79,10 @@ Launch the local frontend page:
 python -m sports_edge_scanner app
 ```
 
-To collect bounded shadow evidence before opening the page:
-
-```bash
-python -m sports_edge_scanner app --shadow-watch --watch-iterations 20 --watch-interval-seconds 1800
-```
-
-To open the page in live-readiness context:
-
-```bash
-python -m sports_edge_scanner app --live
-```
-
-`--live` only changes the operator context and prints a safety notice. It does
-not enable live execution or place real orders.
-
 The dashboard reads the same JSONL files as the CLI. It shows overview metrics,
 latest markets, price history, paper trades, settlements, data-quality checks,
-shadow readiness, and raw report JSON. It is still research-only and does not
-place orders.
+shadow readiness, a Control tab for bounded shadow collection, and raw report
+JSON. It is still research-only and does not place orders.
 
 ## Shadow Trading Simulation
 
