@@ -8,6 +8,12 @@ from typing import Sequence
 from uuid import uuid4
 
 from sports_edge_scanner.connectors.polymarket import PolymarketClient
+from sports_edge_scanner.connectors.polymarket_auth import (
+    EnvironmentPolymarketCredentialProvider,
+    PolymarketGeoblockClient,
+    load_polymarket_auth_config,
+    write_polymarket_auth_config_template,
+)
 from sports_edge_scanner.connectors.polymarket_clob import PolymarketCLOBClient
 from sports_edge_scanner.core.events import read_events
 from sports_edge_scanner.core.execution import (
@@ -575,6 +581,54 @@ def _live_dry_run(args: argparse.Namespace) -> int:
     return 0 if result.status == "dry_run_accepted" else 1
 
 
+def _polymarket_auth_init_config(args: argparse.Namespace) -> int:
+    try:
+        path = write_polymarket_auth_config_template(Path(args.config), force=args.force)
+    except FileExistsError as exc:
+        print(f"polymarket-auth init-config failed: {exc}", file=sys.stderr)
+        return 2
+    print(f"wrote {path}")
+    return 0
+
+
+def _polymarket_auth_check(args: argparse.Namespace) -> int:
+    try:
+        config = load_polymarket_auth_config(Path(args.config))
+        provider = EnvironmentPolymarketCredentialProvider(config)
+        provider.load()
+        credential_status = "present"
+    except Exception:
+        credential_status = "missing"
+        config = load_polymarket_auth_config(Path(args.config))
+    payload = {
+        "enabled": config.enabled,
+        "allow_live_writes": config.allow_live_writes,
+        "require_geoblock_check": config.require_geoblock_check,
+        "credential_status": credential_status,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"Enabled: {payload['enabled']}")
+        print(f"Allow live writes: {payload['allow_live_writes']}")
+        print(f"Credential status: {payload['credential_status']}")
+    return 0 if payload["enabled"] and credential_status == "present" else 1
+
+
+def _polymarket_auth_geoblock(args: argparse.Namespace) -> int:
+    try:
+        status = PolymarketGeoblockClient().check()
+    except Exception as exc:
+        print(f"polymarket-auth geoblock failed: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(status.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(f"Blocked: {status.blocked}")
+        print(f"Country: {status.country or 'unknown'}")
+    return 1 if status.blocked else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sports_edge_scanner",
@@ -723,6 +777,38 @@ def build_parser() -> argparse.ArgumentParser:
     live_dry_run.add_argument("--confirm-token", default="")
     live_dry_run.add_argument("--json", action="store_true")
     live_dry_run.set_defaults(func=_live_dry_run)
+
+    polymarket_auth = subparsers.add_parser(
+        "polymarket-auth",
+        help="Inspect Polymarket authenticated adapter readiness.",
+    )
+    polymarket_auth_subparsers = polymarket_auth.add_subparsers(
+        dest="polymarket_auth_command",
+        required=True,
+    )
+
+    polymarket_auth_init = polymarket_auth_subparsers.add_parser(
+        "init-config",
+        help="Write a non-secret Polymarket auth config template.",
+    )
+    polymarket_auth_init.add_argument("--config", default="polymarket_auth_config.json")
+    polymarket_auth_init.add_argument("--force", action="store_true")
+    polymarket_auth_init.set_defaults(func=_polymarket_auth_init_config)
+
+    polymarket_auth_check = polymarket_auth_subparsers.add_parser(
+        "check",
+        help="Check Polymarket auth config and credential readiness.",
+    )
+    polymarket_auth_check.add_argument("--config", default="polymarket_auth_config.json")
+    polymarket_auth_check.add_argument("--json", action="store_true")
+    polymarket_auth_check.set_defaults(func=_polymarket_auth_check)
+
+    polymarket_auth_geoblock = polymarket_auth_subparsers.add_parser(
+        "geoblock",
+        help="Check Polymarket geographic restriction status.",
+    )
+    polymarket_auth_geoblock.add_argument("--json", action="store_true")
+    polymarket_auth_geoblock.set_defaults(func=_polymarket_auth_geoblock)
 
     return parser
 
