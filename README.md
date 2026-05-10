@@ -23,7 +23,7 @@ python -m sports_edge_scanner report
 - current YES/NO prices when available;
 - implied and break-even probabilities;
 - liquidity and spread warnings;
-- candidate signals only when a fair probability is supplied and clears the configured edge threshold;
+- candidate signals only when model input clears the configured edge threshold;
 - conservative fractional Kelly sizing for positive-edge inputs.
 
 ## Safety Defaults
@@ -87,7 +87,29 @@ The dashboard reads the same JSONL files as the CLI. It shows overview metrics, 
 
 Shadow mode rehearses live-trading decisions without sending real orders, signing payloads, storing private keys, or controlling funds.
 
-Example fair probability file:
+Run a bounded shadow scan:
+
+```bash
+python -m sports_edge_scanner shadow scan --limit 20 --events shadow_events.jsonl
+python -m sports_edge_scanner shadow report --events shadow_events.jsonl
+```
+
+Run bounded unattended collection:
+
+```bash
+python -m sports_edge_scanner shadow watch --limit 20 --iterations 20 --interval-seconds 1800 --events shadow_events.jsonl
+```
+
+`shadow watch` runs repeated shadow scans with separate run ids, appends all
+events to the same log, records failed scan iterations as `shadow_scan_error`,
+and prints the final readiness verdict.
+
+When `--fair` is omitted, shadow mode automatically builds conservative fair
+probability estimates from public orderbook and market data. Estimates include
+source, confidence, and rejection reasons in the event log. Low-confidence
+estimates do not generate candidate trades.
+
+Manual fair probability files are an advanced override for controlled tests:
 
 ```json
 {
@@ -102,14 +124,16 @@ Example fair probability file:
 }
 ```
 
-Run a bounded shadow scan:
-
 ```bash
 python -m sports_edge_scanner shadow scan --limit 20 --fair fair_probabilities.json --events shadow_events.jsonl
-python -m sports_edge_scanner shadow report --events shadow_events.jsonl
 ```
 
-Every candidate is either rejected with explicit risk reasons or converted into a simulated limit order and fill record. Shadow results are not live fills and should be treated as research evidence only.
+Every candidate is either rejected with explicit risk reasons or converted into
+a simulated limit order and fill record. The report also includes an automatic
+readiness verdict with blockers and thresholds. `READY` means the paper evidence
+is adequate for the next design review; it is not permission to trade live.
+Shadow results are not live fills and should be treated as research evidence
+only.
 
 Create safe starter files:
 

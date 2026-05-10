@@ -1,7 +1,16 @@
+import argparse
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
-from sports_edge_scanner.cli import build_parser, run_shadow_smoke, shadow_smoke_exit_code
+from sports_edge_scanner.cli import (
+    _shadow_report,
+    _shadow_watch,
+    build_parser,
+    run_shadow_smoke,
+    shadow_smoke_exit_code,
+)
+from sports_edge_scanner.core.auto_fair import AutoFairConfig
 from sports_edge_scanner.core.fair import FairProbabilityBook
 from sports_edge_scanner.core.risk import RiskConfig
 from sports_edge_scanner.core.shadow_pipeline import run_shadow_scan
@@ -86,6 +95,17 @@ class SlippyBookClient:
         )
 
 
+class WideBookClient:
+    def fetch_orderbook(self, token_id):
+        return OrderBook(
+            market_id="m1",
+            token_id=token_id,
+            bids=[OrderBookLevel(price=0.35, size=1.0)],
+            asks=[OrderBookLevel(price=0.65, size=1.0)],
+            timestamp="2026-05-10T00:00:00+00:00",
+        )
+
+
 def test_parser_supports_shadow_scan_and_report():
     parser = build_parser()
 
@@ -95,6 +115,17 @@ def test_parser_supports_shadow_scan_and_report():
     assert scan_args.command == "shadow"
     assert scan_args.shadow_command == "scan"
     assert report_args.shadow_command == "report"
+
+
+def test_parser_supports_shadow_scan_without_fair_and_auto_confidence():
+    parser = build_parser()
+
+    args = parser.parse_args(
+        ["shadow", "scan", "--limit", "5", "--auto-fair-min-confidence", "0.8"]
+    )
+
+    assert args.fair == ""
+    assert args.auto_fair_min_confidence == 0.8
 
 
 def test_parser_supports_shadow_init_config():
@@ -128,6 +159,35 @@ def test_parser_supports_shadow_smoke():
     assert args.shadow_command == "smoke"
     assert args.limit == 2
     assert args.json is True
+
+
+def test_parser_supports_shadow_watch():
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "shadow",
+            "watch",
+            "--limit",
+            "5",
+            "--iterations",
+            "2",
+            "--interval-seconds",
+            "0",
+            "--events",
+            "shadow.jsonl",
+            "--auto-fair-min-confidence",
+            "0.8",
+        ]
+    )
+
+    assert args.command == "shadow"
+    assert args.shadow_command == "watch"
+    assert args.limit == 5
+    assert args.iterations == 2
+    assert args.interval_seconds == 0
+    assert args.events == "shadow.jsonl"
+    assert args.auto_fair_min_confidence == 0.8
 
 
 def test_run_shadow_smoke_reports_success_with_fake_clients():
@@ -210,6 +270,64 @@ def test_run_shadow_scan_writes_signal_risk_order_and_fill_events(tmp_path):
     assert "risk_decision" in event_types
     assert "shadow_order" in event_types
     assert "shadow_fill" in event_types
+
+
+def test_run_shadow_scan_without_manual_fair_emits_model_estimates(tmp_path):
+    events_path = tmp_path / "shadow_events.jsonl"
+
+    summary = run_shadow_scan(
+        market_client=FakeMarketClient(),
+        book_client=FakeBookClient(),
+        fair_book=None,
+        risk_config=RiskConfig(min_edge=0.03),
+        limit=5,
+        events_path=events_path,
+        run_id="run-1",
+        auto_fair_config=AutoFairConfig(min_confidence=0.75),
+        now=datetime(2026, 5, 10, 0, 0, tzinfo=timezone.utc),
+    )
+
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    estimate_events = [
+        event for event in events if event["event_type"] == "model_estimate"
+    ]
+
+    assert summary["model_estimate_count"] == 2
+    assert len(estimate_events) == 2
+    assert summary["candidate_count"] == 0
+
+
+def test_run_shadow_scan_without_usable_auto_estimates_has_no_candidates(tmp_path):
+    events_path = tmp_path / "shadow_events.jsonl"
+
+    summary = run_shadow_scan(
+        market_client=FakeMarketClient(),
+        book_client=WideBookClient(),
+        fair_book=None,
+        risk_config=RiskConfig(min_edge=0.03),
+        limit=5,
+        events_path=events_path,
+        run_id="run-1",
+        auto_fair_config=AutoFairConfig(min_confidence=0.75),
+        now=datetime(2026, 5, 10, 0, 0, tzinfo=timezone.utc),
+    )
+
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    estimate_events = [
+        event for event in events if event["event_type"] == "model_estimate"
+    ]
+
+    assert summary["candidate_count"] == 0
+    assert all(not event["usable"] for event in estimate_events)
+    assert {
+        reason for event in estimate_events for reason in event["reasons"]
+    } >= {"wide spread", "thin top of book"}
 
 
 def test_run_shadow_scan_logs_orderbooks_and_tracks_market_exposure(tmp_path):
@@ -315,3 +433,51 @@ def test_run_shadow_scan_rejects_stale_orderbook(tmp_path):
     assert summary["accepted_order_count"] == 0
     assert summary["rejected_order_count"] == 1
     assert "stale orderbook" in risk_reasons
+
+
+def test_shadow_report_text_prints_readiness(tmp_path, capsys):
+    events_path = tmp_path / "shadow_events.jsonl"
+
+    exit_code = _shadow_report(
+        argparse.Namespace(events=str(events_path), json=False)
+    )
+
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Readiness: NOT READY" in output
+    assert "insufficient shadow runs" in output
+
+
+def test_shadow_watch_text_prints_summary_and_readiness(monkeypatch, tmp_path, capsys):
+    events_path = tmp_path / "shadow_events.jsonl"
+
+    monkeypatch.setattr(
+        "sports_edge_scanner.cli.PolymarketClient",
+        lambda: FakeMarketClient(),
+    )
+    monkeypatch.setattr(
+        "sports_edge_scanner.cli.PolymarketCLOBClient",
+        lambda: FakeBookClient(),
+    )
+
+    exit_code = _shadow_watch(
+        argparse.Namespace(
+            limit=1,
+            iterations=1,
+            interval_seconds=0.0,
+            fair="",
+            config="",
+            events=str(events_path),
+            auto_fair_min_confidence=0.75,
+            json=False,
+        )
+    )
+
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Completed iterations: 1" in output
+    assert "Successful iterations: 1" in output
+    assert "Failed iterations: 0" in output
+    assert "Readiness: NOT READY" in output

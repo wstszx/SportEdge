@@ -1,5 +1,6 @@
 from typing import Any
 
+from sports_edge_scanner.core.shadow_readiness import evaluate_shadow_readiness
 from sports_edge_scanner.core.shadow_state import build_shadow_state
 
 
@@ -13,12 +14,16 @@ def _warnings(state: dict[str, Any]) -> list[str]:
         warnings.append("unfilled shadow orders present")
     if state["candidate_count"] and not state["simulated_notional_filled"]:
         warnings.append("candidates present but no fills")
+    if state["model_estimate_count"] and not state["usable_model_estimate_count"]:
+        warnings.append("no usable model estimates")
     return warnings
 
 
 def build_shadow_report(events: list[dict[str, Any]]) -> dict[str, Any]:
     state = build_shadow_state(events)
-    return {
+    report = {
         **state,
         "data_quality_warnings": _warnings(state),
     }
+    report["readiness"] = evaluate_shadow_readiness(report)
+    return report

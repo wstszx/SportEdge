@@ -25,7 +25,8 @@ from sports_edge_scanner.core.execution import (
     run_dry_run_execution,
     write_live_config_template,
 )
-from sports_edge_scanner.core.fair import FairProbabilityBook, load_fair_probability_book
+from sports_edge_scanner.core.auto_fair import AutoFairConfig
+from sports_edge_scanner.core.fair import load_fair_probability_book
 from sports_edge_scanner.core.ledger import (
     append_record,
     paper_settlement_record,
@@ -38,6 +39,7 @@ from sports_edge_scanner.core.risk import RiskConfig
 from sports_edge_scanner.core.shadow_config import write_shadow_config_templates
 from sports_edge_scanner.core.shadow_pipeline import run_shadow_scan
 from sports_edge_scanner.core.shadow_reports import build_shadow_report
+from sports_edge_scanner.core.shadow_watch import run_shadow_watch
 from sports_edge_scanner.core.signals import classify_market
 from sports_edge_scanner.core.snapshots import (
     append_snapshots,
@@ -377,7 +379,7 @@ def _shadow_scan(args: argparse.Namespace) -> int:
         fair_book = (
             load_fair_probability_book(Path(args.fair))
             if args.fair
-            else FairProbabilityBook()
+            else None
         )
         summary = run_shadow_scan(
             market_client=PolymarketClient(),
@@ -387,6 +389,9 @@ def _shadow_scan(args: argparse.Namespace) -> int:
             limit=args.limit,
             events_path=Path(args.events),
             run_id=str(uuid4()),
+            auto_fair_config=AutoFairConfig(
+                min_confidence=args.auto_fair_min_confidence,
+            ),
         )
     except Exception as exc:
         print(f"shadow scan failed: {exc}", file=sys.stderr)
@@ -399,6 +404,11 @@ def _shadow_scan(args: argparse.Namespace) -> int:
         print(f"Candidates: {summary['candidate_count']}")
         print(f"Accepted shadow orders: {summary['accepted_order_count']}")
         print(f"Rejected shadow orders: {summary['rejected_order_count']}")
+        print(f"Model estimates: {summary.get('model_estimate_count', 0)}")
+        print(
+            "Usable model estimates: "
+            f"{summary.get('usable_model_estimate_count', 0)}"
+        )
         print(f"Events: {summary['events_path']}")
     return 0
 
@@ -413,6 +423,67 @@ def _shadow_report(args: argparse.Namespace) -> int:
         print(f"Rejected shadow orders: {report['rejected_order_count']}")
         print(f"Simulated notional filled: ${report['simulated_notional_filled']:,.2f}")
         print(f"Average slippage: {report['average_slippage']:.4f}")
+        _print_readiness(report["readiness"])
+    return 0
+
+
+def _print_readiness(readiness: dict[str, object]) -> None:
+    readiness_label = "READY" if readiness.get("ready") else "NOT READY"
+    print(f"Readiness: {readiness_label}")
+    blockers = readiness.get("blockers") or []
+    if blockers:
+        print(f"Readiness blockers: {', '.join(str(blocker) for blocker in blockers)}")
+
+
+def _shadow_watch(args: argparse.Namespace) -> int:
+    try:
+        fair_book = (
+            load_fair_probability_book(Path(args.fair))
+            if args.fair
+            else None
+        )
+        risk_config = _load_risk_config(args.config)
+        market_client = PolymarketClient()
+        book_client = PolymarketCLOBClient()
+        events_path = Path(args.events)
+        auto_fair_config = AutoFairConfig(
+            min_confidence=args.auto_fair_min_confidence,
+        )
+
+        def scan_once(iteration: int) -> dict[str, object]:
+            return run_shadow_scan(
+                market_client=market_client,
+                book_client=book_client,
+                fair_book=fair_book,
+                risk_config=risk_config,
+                limit=args.limit,
+                events_path=events_path,
+                run_id=str(uuid4()),
+                auto_fair_config=auto_fair_config,
+            )
+
+        result = run_shadow_watch(
+            scan_once=scan_once,
+            build_report=lambda: build_shadow_report(read_events(events_path)),
+            events_path=events_path,
+            iterations=args.iterations,
+            interval_seconds=args.interval_seconds,
+        )
+    except ValueError as exc:
+        print(f"shadow watch failed: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:
+        print(f"shadow watch failed: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(f"Completed iterations: {result['completed_iterations']}")
+        print(f"Successful iterations: {result['successful_iterations']}")
+        print(f"Failed iterations: {result['failed_iterations']}")
+        print(f"Events: {result['events_path']}")
+        _print_readiness(result.get("readiness", {}))
     return 0
 
 
@@ -719,6 +790,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     shadow_scan.add_argument("--limit", type=int, default=20)
     shadow_scan.add_argument("--fair", default="", help="Fair probability JSON file.")
+    shadow_scan.add_argument("--auto-fair-min-confidence", type=float, default=0.75)
     shadow_scan.add_argument("--config", default="", help="Shadow risk config JSON file.")
     shadow_scan.add_argument("--events", default="shadow_events.jsonl")
     shadow_scan.add_argument("--json", action="store_true")
@@ -731,6 +803,20 @@ def build_parser() -> argparse.ArgumentParser:
     shadow_report.add_argument("--events", default="shadow_events.jsonl")
     shadow_report.add_argument("--json", action="store_true")
     shadow_report.set_defaults(func=_shadow_report)
+
+    shadow_watch = shadow_subparsers.add_parser(
+        "watch",
+        help="Run repeated bounded shadow scans and report readiness.",
+    )
+    shadow_watch.add_argument("--limit", type=int, default=20)
+    shadow_watch.add_argument("--iterations", type=int, default=20)
+    shadow_watch.add_argument("--interval-seconds", type=float, default=1800.0)
+    shadow_watch.add_argument("--fair", default="", help="Fair probability JSON file.")
+    shadow_watch.add_argument("--auto-fair-min-confidence", type=float, default=0.75)
+    shadow_watch.add_argument("--config", default="", help="Shadow risk config JSON file.")
+    shadow_watch.add_argument("--events", default="shadow_events.jsonl")
+    shadow_watch.add_argument("--json", action="store_true")
+    shadow_watch.set_defaults(func=_shadow_watch)
 
     shadow_smoke = shadow_subparsers.add_parser(
         "smoke",
