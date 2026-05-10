@@ -57,3 +57,37 @@ def test_fetch_orderbook_uses_token_id_parameter(monkeypatch):
 
     assert "token_id=token-a" in captured["url"]
     assert book.best_ask == 0.47
+
+
+def test_fetch_orderbook_retries_after_transient_failure(monkeypatch):
+    calls = {"count": 0}
+
+    def fake_urlopen(request, timeout):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise OSError("temporary network error")
+        return FakeResponse(
+            {
+                "market": "market-1",
+                "asset_id": "token-a",
+                "bids": [],
+                "asks": [{"price": "0.47", "size": "10"}],
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    book = PolymarketCLOBClient(retry_delay_seconds=0.0).fetch_orderbook("token-a")
+
+    assert calls["count"] == 2
+    assert book.best_ask == 0.47
+
+
+def test_fetch_orderbook_rejects_missing_token_identity():
+    try:
+        normalize_orderbook({"market": "market-1", "bids": [], "asks": []}, fallback_token_id="")
+        raised = False
+    except ValueError as exc:
+        raised = "token id" in str(exc)
+
+    assert raised is True

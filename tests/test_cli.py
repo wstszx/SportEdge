@@ -55,6 +55,15 @@ def test_market_snapshot_includes_break_even_probabilities():
     assert snapshot["no_break_even"] == pytest.approx(0.52)
 
 
+def test_market_snapshot_includes_generic_outcomes():
+    snapshot = market_snapshot(make_market())
+
+    assert snapshot["outcomes"] == [
+        {"name": "YES", "price": 0.47, "token_id": None},
+        {"name": "NO", "price": 0.52, "token_id": None},
+    ]
+
+
 def test_parser_supports_snapshot_collect_command():
     parser = build_parser()
 

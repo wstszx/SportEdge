@@ -110,3 +110,11 @@ python -m sports_edge_scanner shadow report --events shadow_events.jsonl
 ```
 
 Every candidate is either rejected with explicit risk reasons or converted into a simulated limit order and fill record. Shadow results are not live fills and should be treated as research evidence only.
+
+Create safe starter files:
+
+```bash
+python -m sports_edge_scanner shadow init-config
+```
+
+This writes `shadow_config.json` and `fair_probabilities.example.json` unless they already exist. Use `--force` only when you intentionally want to overwrite them.

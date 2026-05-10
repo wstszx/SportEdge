@@ -1,4 +1,5 @@
 import json
+import time
 import urllib.parse
 import urllib.request
 from typing import Any
@@ -133,9 +134,27 @@ def normalize_market(raw_market: dict[str, Any]) -> Market:
     )
 
 
+def _raw_markets_from_payload(payload: Any) -> list[Any]:
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        if isinstance(payload.get("markets"), list):
+            return payload["markets"]
+        if isinstance(payload.get("data"), list):
+            return payload["data"]
+    raise ValueError("markets response must be a list or contain markets/data list")
+
+
 class PolymarketClient:
-    def __init__(self, base_url: str = "https://gamma-api.polymarket.com") -> None:
+    def __init__(
+        self,
+        base_url: str = "https://gamma-api.polymarket.com",
+        attempts: int = 2,
+        retry_delay_seconds: float = 0.25,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.attempts = max(1, attempts)
+        self.retry_delay_seconds = max(0.0, retry_delay_seconds)
 
     def fetch_markets(self, limit: int = 50, active: bool = True) -> list[Market]:
         requested_limit = max(1, min(limit, 500))
@@ -154,13 +173,20 @@ class PolymarketClient:
             url,
             headers={"User-Agent": "sports-edge-scanner/0.1.0"},
         )
-        with urllib.request.urlopen(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-
-        if isinstance(payload, dict):
-            raw_markets = payload.get("markets") or payload.get("data") or []
+        last_error: Exception | None = None
+        for attempt in range(self.attempts):
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                raw_markets = _raw_markets_from_payload(payload)
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt < self.attempts - 1:
+                    time.sleep(self.retry_delay_seconds)
         else:
-            raw_markets = payload
+            assert last_error is not None
+            raise last_error
 
         markets: list[Market] = []
         for raw_market in raw_markets:

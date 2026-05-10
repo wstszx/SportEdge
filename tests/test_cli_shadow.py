@@ -1,9 +1,10 @@
 import json
 from datetime import datetime, timezone
 
-from sports_edge_scanner.cli import build_parser, run_shadow_scan
+from sports_edge_scanner.cli import build_parser
 from sports_edge_scanner.core.fair import FairProbabilityBook
 from sports_edge_scanner.core.risk import RiskConfig
+from sports_edge_scanner.core.shadow_pipeline import run_shadow_scan
 from sports_edge_scanner.models import Market, MarketOutcome, OrderBook, OrderBookLevel
 
 
@@ -62,6 +63,28 @@ def test_parser_supports_shadow_scan_and_report():
     assert scan_args.command == "shadow"
     assert scan_args.shadow_command == "scan"
     assert report_args.shadow_command == "report"
+
+
+def test_parser_supports_shadow_init_config():
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "shadow",
+            "init-config",
+            "--config",
+            "custom_config.json",
+            "--fair",
+            "custom_fair.json",
+            "--force",
+        ]
+    )
+
+    assert args.command == "shadow"
+    assert args.shadow_command == "init-config"
+    assert args.config == "custom_config.json"
+    assert args.fair == "custom_fair.json"
+    assert args.force is True
 
 
 def test_run_shadow_scan_writes_signal_risk_order_and_fill_events(tmp_path):
