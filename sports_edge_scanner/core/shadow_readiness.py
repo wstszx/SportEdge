@@ -43,6 +43,7 @@ def evaluate_shadow_readiness(
     )
     fill_count = _fill_count(report)
     orderbook_error_count = int(_number(report, "orderbook_error_count"))
+    shadow_scan_error_count = int(_number(report, "shadow_scan_error_count"))
     rejected_order_count = int(_number(report, "rejected_order_count"))
     unfilled_notional = _number(report, "simulated_unfilled_notional")
     average_slippage = _number(report, "average_slippage")
@@ -54,6 +55,7 @@ def evaluate_shadow_readiness(
         "usable_model_estimate_rate": usable_rate,
         "fill_count": fill_count,
         "orderbook_error_count": orderbook_error_count,
+        "shadow_scan_error_count": shadow_scan_error_count,
         "rejected_order_count": rejected_order_count,
         "simulated_unfilled_notional": unfilled_notional,
         "average_slippage": average_slippage,
@@ -70,6 +72,8 @@ def evaluate_shadow_readiness(
         blockers.append("insufficient fills")
     if orderbook_error_count > effective_config.max_orderbook_error_count:
         blockers.append("orderbook errors present")
+    if shadow_scan_error_count:
+        blockers.append("shadow scan errors present")
     if rejected_order_count > effective_config.max_rejected_order_count:
         blockers.append("rejected orders present")
     if unfilled_notional > effective_config.max_unfilled_notional:

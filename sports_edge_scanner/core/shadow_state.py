@@ -6,6 +6,7 @@ def build_shadow_state(events: list[dict[str, Any]]) -> dict[str, Any]:
     accepted_order_count = 0
     rejected_order_count = 0
     orderbook_error_count = 0
+    shadow_scan_error_count = 0
     model_estimate_count = 0
     usable_model_estimate_count = 0
     rejections_by_reason: dict[str, int] = {}
@@ -29,6 +30,8 @@ def build_shadow_state(events: list[dict[str, Any]]) -> dict[str, Any]:
             candidate_count += 1
         elif event_type == "orderbook_error":
             orderbook_error_count += 1
+        elif event_type == "shadow_scan_error":
+            shadow_scan_error_count += 1
         elif event_type == "model_estimate":
             model_estimate_count += 1
             if event.get("usable"):
@@ -77,6 +80,7 @@ def build_shadow_state(events: list[dict[str, Any]]) -> dict[str, Any]:
         "accepted_order_count": accepted_order_count,
         "rejected_order_count": rejected_order_count,
         "orderbook_error_count": orderbook_error_count,
+        "shadow_scan_error_count": shadow_scan_error_count,
         "model_estimate_count": model_estimate_count,
         "usable_model_estimate_count": usable_model_estimate_count,
         "unusable_model_estimate_count": (

@@ -62,3 +62,14 @@ def test_build_shadow_state_counts_distinct_run_ids():
 
     assert state["run_count"] == 2
     assert state["run_ids"] == ["run-1", "run-2"]
+
+
+def test_build_shadow_state_counts_shadow_scan_errors():
+    state = build_shadow_state(
+        [
+            {"event_type": "shadow_scan_error", "run_id": "run-1"},
+            {"event_type": "shadow_scan_error", "run_id": "run-2"},
+        ]
+    )
+
+    assert state["shadow_scan_error_count"] == 2

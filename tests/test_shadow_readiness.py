@@ -75,3 +75,12 @@ def test_readiness_uses_custom_thresholds():
 
     assert readiness["ready"] is True
     assert readiness["thresholds"]["min_run_count"] == 1
+
+
+def test_scan_errors_block_readiness():
+    readiness = evaluate_shadow_readiness(
+        clean_report(shadow_scan_error_count=1)
+    )
+
+    assert readiness["ready"] is False
+    assert "shadow scan errors present" in readiness["blockers"]
