@@ -164,11 +164,19 @@ def test_dashboard_has_shadow_ui_labels():
     assert _label("shadow_quality_clean") == "影子交易数据质量当前无警告。"
 
 
+def test_dashboard_has_control_ui_labels():
+    assert _label("control_tab") == "控制台"
+    assert _label("run_shadow_collection") == "运行纸面采集"
+    assert _label("run_quick_shadow_scan") == "快速扫描一次"
+    assert _label("live_safety_status") == "实盘安全状态"
+
+
 def test_dashboard_translates_status_reasons_sides_and_json_keys():
     assert _translate_value("candidate") == "候选"
     assert _translate_value("watch") == "观察"
     assert _translate_value("YES") == "是"
     assert _translate_value("no fair probability supplied") == "未提供公平概率"
+    assert _translate_value("shadow scan errors present") == "存在影子扫描错误"
     assert _translate_value(None) == "无数据"
 
     localized = _localize_json(

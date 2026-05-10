@@ -39,6 +39,7 @@ UI_TEXT = {
     "settlements_tab": "结算",
     "quality_tab": "数据质量",
     "shadow_tab": "影子交易",
+    "control_tab": "控制台",
     "raw_report_tab": "原始报告",
     "latest_markets": "最新市场",
     "price_history": "价格历史",
@@ -74,6 +75,20 @@ UI_TEXT = {
     "shadow_risk_decisions": "风控决策",
     "shadow_fills": "影子成交",
     "shadow_raw_report": "影子原始报告",
+    "shadow_controls": "纸面采集控制",
+    "shadow_limit": "市场数量",
+    "shadow_iterations": "采集次数",
+    "shadow_interval_seconds": "间隔秒数",
+    "auto_fair_min_confidence": "自动概率最低置信度",
+    "shadow_config_path": "影子配置文件",
+    "run_shadow_collection": "运行纸面采集",
+    "run_quick_shadow_scan": "快速扫描一次",
+    "shadow_collection_started": "纸面采集已完成，请查看下方状态并刷新报告。",
+    "shadow_collection_failed": "纸面采集失败，请检查配置和事件日志。",
+    "readiness": "准入状态",
+    "readiness_blockers": "准入阻断原因",
+    "live_safety_status": "实盘安全状态",
+    "live_safety_message": "实盘交易仍然禁用。当前页面只允许纸面采集和安全状态查看。",
     "accepted_orders": "通过订单",
     "rejected_orders": "拒绝订单",
     "filled_notional": "已成交名义金额",
@@ -191,6 +206,11 @@ VALUE_LABELS = {
     "candidates present but no fills": "存在候选信号但没有成交",
     "slippage above maximum": "滑点超过上限",
     "stale orderbook": "订单簿过期",
+    "shadow scan errors present": "存在影子扫描错误",
+    "insufficient shadow runs": "影子运行次数不足",
+    "insufficient model estimates": "模型估算数量不足",
+    "usable model estimate rate below minimum": "可用模型估算比例低于最低要求",
+    "insufficient fills": "模拟成交数量不足",
 }
 
 
@@ -422,6 +442,85 @@ def _render_quality(state: dict) -> None:
     st.dataframe(_display_rows(quality["markets"]), use_container_width=True, hide_index=True)
 
 
+def _render_readiness(readiness: dict) -> None:
+    status = "READY" if readiness.get("ready") else "NOT READY"
+    st.metric(_label("readiness"), status)
+    blockers = readiness.get("blockers") or []
+    if blockers:
+        st.warning(
+            f"{_label('readiness_blockers')}: "
+            + " | ".join(_translate_value(item) for item in blockers)
+        )
+
+
+def _render_controls(
+    state: dict,
+    shadow_events_path: Path,
+) -> None:
+    st.subheader(_label("shadow_controls"))
+    with st.form("shadow-controls"):
+        events_path = st.text_input(
+            _label("shadow_events_path"),
+            str(shadow_events_path),
+            key="control-shadow-events",
+        )
+        config_path = st.text_input(
+            _label("shadow_config_path"),
+            "shadow_config.json",
+            key="control-shadow-config",
+        )
+        columns = st.columns(4)
+        limit = columns[0].number_input(
+            _label("shadow_limit"),
+            min_value=1,
+            max_value=100,
+            value=20,
+            step=1,
+        )
+        iterations = columns[1].number_input(
+            _label("shadow_iterations"),
+            min_value=1,
+            max_value=20,
+            value=3,
+            step=1,
+        )
+        interval_seconds = columns[2].number_input(
+            _label("shadow_interval_seconds"),
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+        )
+        min_confidence = columns[3].number_input(
+            _label("auto_fair_min_confidence"),
+            min_value=0.0,
+            max_value=1.0,
+            value=0.75,
+            step=0.05,
+        )
+        run_collection = st.form_submit_button(_label("run_shadow_collection"))
+        run_quick = st.form_submit_button(_label("run_quick_shadow_scan"))
+
+    if run_collection or run_quick:
+        selected_iterations = 1 if run_quick else int(iterations)
+        exit_code = run_dashboard_shadow_watch(
+            limit=int(limit),
+            iterations=selected_iterations,
+            interval_seconds=float(interval_seconds),
+            config_path=config_path,
+            events_path=events_path,
+            auto_fair_min_confidence=float(min_confidence),
+        )
+        if exit_code == 0:
+            st.success(_label("shadow_collection_started"))
+            st.rerun()
+        else:
+            st.error(_label("shadow_collection_failed"))
+
+    _render_readiness(state["shadow_report"].get("readiness", {}))
+    st.subheader(_label("live_safety_status"))
+    st.info(_label("live_safety_message"))
+
+
 def _render_shadow(state: dict) -> None:
     report = state["shadow_report"]
     st.subheader(_label("shadow_overview"))
@@ -504,13 +603,22 @@ def main() -> None:
     )
     _render_overview(state)
 
-    markets_tab, trades_tab, settlements_tab, quality_tab, shadow_tab, raw_tab = st.tabs(
+    (
+        markets_tab,
+        trades_tab,
+        settlements_tab,
+        quality_tab,
+        shadow_tab,
+        control_tab,
+        raw_tab,
+    ) = st.tabs(
         [
             _label("markets_tab"),
             _label("paper_trades_tab"),
             _label("settlements_tab"),
             _label("quality_tab"),
             _label("shadow_tab"),
+            _label("control_tab"),
             _label("raw_report_tab"),
         ]
     )
@@ -524,6 +632,8 @@ def main() -> None:
         _render_quality(state)
     with shadow_tab:
         _render_shadow(state)
+    with control_tab:
+        _render_controls(state, shadow_events_path)
     with raw_tab:
         st.subheader(_label("report"))
         st.json(_localize_json(state["report"]))
