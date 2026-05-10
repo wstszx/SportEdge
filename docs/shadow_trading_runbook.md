@@ -2,32 +2,31 @@
 
 Sports Edge Scanner shadow mode is a research workflow. It does not place real orders, sign payloads, manage wallets, cancel orders, or control funds.
 
-## 1. Create Starter Files
+## 1. Start The App
 
 ```bash
-python -m sports_edge_scanner shadow init-config
+python -m sports_edge_scanner app
 ```
 
-This creates `shadow_config.json` and `fair_probabilities.example.json` unless
-they already exist. `shadow_config.json` controls risk limits.
+Use the Control tab to configure and run paper/shadow collection. The app is
+the normal operator workflow.
 
-## 2. Check Public Data
+## 2. Run Paper/Shadow Collection
 
-```bash
-python -m sports_edge_scanner shadow smoke --limit 2
-python -m sports_edge_scanner shadow smoke --limit 2 --json
-```
+In the Control tab, set:
 
-Run the smoke check before longer scans. It verifies that public Gamma market
-data and public CLOB orderbook data can be fetched without credentials. A
-non-zero exit means the data source is unavailable, no usable markets were
-found, no token ids were available, or orderbook fetches failed.
+- shadow events path;
+- shadow config path;
+- market limit;
+- collection iterations;
+- interval seconds;
+- automatic fair-probability confidence threshold.
 
-## 3. Run A Shadow Scan
+Then choose a quick one-iteration scan or bounded paper collection. Each
+iteration receives a separate run id and appends to the same event log. If an
+iteration fails, the app records a `shadow_scan_error` event.
 
-```bash
-python -m sports_edge_scanner shadow scan --limit 20 --config shadow_config.json --events shadow_events.jsonl
-```
+## 3. Review Readiness
 
 When `--fair` is omitted, the scanner automatically creates conservative fair
 probability estimates from public orderbook and market data. Each estimate is
@@ -39,42 +38,7 @@ Each candidate is either rejected by risk controls or simulated as a limit order
 against observed orderbook depth. The scan writes append-only events to
 `shadow_events.jsonl`.
 
-## 4. Run Bounded Shadow Watch
-
-```bash
-python -m sports_edge_scanner shadow watch --limit 20 --iterations 20 --interval-seconds 1800 --config shadow_config.json --events shadow_events.jsonl
-```
-
-Use watch mode to accumulate readiness evidence without manually rerunning
-`shadow scan`. Each iteration receives a separate run id and appends to the same
-event log. If an iteration fails, the command writes a `shadow_scan_error` event
-and continues. The final output includes completed, successful, and failed
-iterations plus the readiness verdict.
-
-## 5. Optional Manual Fair Override
-
-Copy `fair_probabilities.example.json` to `fair_probabilities.json`, then enter
-independent fair probabilities by market/outcome or token id only when running
-controlled tests. Treat these probabilities as model inputs, not facts. They
-need independent evidence, calibration, and sample-size review before the
-output should influence real trading decisions.
-
-```bash
-python -m sports_edge_scanner shadow scan --limit 20 --fair fair_probabilities.json --config shadow_config.json --events shadow_events.jsonl
-```
-
-## 6. Review The Report
-
-```bash
-python -m sports_edge_scanner shadow report --events shadow_events.jsonl
-python -m sports_edge_scanner shadow report --events shadow_events.jsonl --json
-```
-
-Review model estimate count, usable and unusable estimates, candidate count,
-accepted and rejected shadow orders, filled and unfilled notional, exposure by
-market, exposure by outcome, average slippage, and data quality warnings.
-
-The report also includes a readiness verdict:
+The Shadow and Control tabs show the readiness verdict:
 
 - `READY`: paper evidence meets the configured gate for the next design review.
 - `NOT READY`: blockers explain what evidence is missing or unreliable.
@@ -82,17 +46,15 @@ The report also includes a readiness verdict:
 `READY` is not live-trading permission. It only means the shadow evidence is
 clean enough to consider the next safety design step.
 
-## 7. Open The Dashboard
+## 4. Optional Manual Fair Override
 
-```bash
-streamlit run dashboard_app.py
-```
+Copy `fair_probabilities.example.json` to `fair_probabilities.json`, then enter
+independent fair probabilities by market/outcome or token id only when running
+controlled tests. Treat these probabilities as model inputs, not facts. They
+need independent evidence, calibration, and sample-size review before the
+output should influence real trading decisions.
 
-Set the ledger, market snapshot, and shadow events paths in the sidebar. Use the
-Shadow tab to inspect exposure, risk decisions, fills, warnings, and raw report
-JSON.
-
-## 8. Warnings That Make Results Unreliable
+## 5. Warnings That Make Results Unreliable
 
 - `orderbook errors present`: the run did not observe all candidate liquidity.
 - `rejected orders present`: risk controls blocked one or more candidates.
@@ -110,3 +72,9 @@ JSON.
 Do not use shadow results as production evidence when warnings are present,
 when fills are missing, when public API smoke checks fail, or when fair
 probabilities have not been independently validated.
+
+## Advanced CLI
+
+Lower-level commands such as `shadow smoke`, `shadow scan`, `shadow watch`, and
+`shadow report` remain available for tests and automation. They are not the
+normal operator workflow.

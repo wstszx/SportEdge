@@ -32,85 +32,28 @@ tests and automation, but the normal operator workflow is the app.
 - Kelly sizing returns zero when the edge is not positive.
 - The default Kelly output uses a 0.25 fraction and a 5% bankroll cap.
 
-## Validation Workflow
-
-Use snapshots and paper trades to check whether a signal has evidence, not just a nice-looking EV number.
-
-```bash
-python -m sports_edge_scanner snapshot collect --limit 50 --snapshots market_snapshots.jsonl
-python -m sports_edge_scanner paper add --market "0xabc..." --market-id "0xabc..." --side YES --price 0.47 --size 25 --note "manual fair probability 55%"
-python -m sports_edge_scanner snapshot collect --limit 50 --snapshots market_snapshots.jsonl
-python -m sports_edge_scanner quality --ledger paper_trades.jsonl --snapshots market_snapshots.jsonl
-python -m sports_edge_scanner report --ledger paper_trades.jsonl --snapshots market_snapshots.jsonl
-```
-
-The report uses the latest snapshot price as a mark-to-market price. For a YES paper trade, positive CLV means the latest YES price is above the entry price. For a NO paper trade, positive CLV means the latest NO price is above the entry price.
-
-Run `quality` before trusting the report. It shows snapshot count, market count, total time span, candidate snapshot count, missing price snapshots, and paper trades that cannot be matched to any collected market.
-
-After a market resolves, record the result:
-
-```bash
-python -m sports_edge_scanner paper settle --market "0xabc..." --market-id "0xabc..." --winning-side YES --note "official resolution"
-python -m sports_edge_scanner report --ledger paper_trades.jsonl --snapshots market_snapshots.jsonl
-```
-
-Settlement records let the report calculate realized PnL, realized ROI, win rate, and max drawdown. Unsettled trades still use mark-to-market pricing when matching snapshots are available.
-
-For unattended collection, run a bounded watch loop:
-
-```bash
-python -m sports_edge_scanner snapshot watch --limit 50 --iterations 48 --interval-seconds 1800 --snapshots market_snapshots.jsonl
-```
-
-That collects 48 snapshots, one every 30 minutes. Prefer bounded runs so failures are visible and logs stay manageable.
-
-## Local Dashboard
-
-Install the optional dashboard dependencies:
-
-```bash
-python -m pip install -e .[dashboard]
-```
-
-Launch the local frontend page:
-
-```bash
-python -m sports_edge_scanner app
-```
+## Local App
 
 The dashboard reads the same JSONL files as the CLI. It shows overview metrics,
 latest markets, price history, paper trades, settlements, data-quality checks,
 shadow readiness, a Control tab for bounded shadow collection, and raw report
 JSON. It is still research-only and does not place orders.
 
-## Shadow Trading Simulation
+## Paper And Shadow Workflow
 
 Shadow mode rehearses live-trading decisions without sending real orders, signing payloads, storing private keys, or controlling funds.
 
-Run a bounded shadow scan:
-
-```bash
-python -m sports_edge_scanner shadow scan --limit 20 --events shadow_events.jsonl
-python -m sports_edge_scanner shadow report --events shadow_events.jsonl
-```
-
-Run bounded unattended collection:
-
-```bash
-python -m sports_edge_scanner shadow watch --limit 20 --iterations 20 --interval-seconds 1800 --events shadow_events.jsonl
-```
-
-`shadow watch` runs repeated shadow scans with separate run ids, appends all
-events to the same log, records failed scan iterations as `shadow_scan_error`,
-and prints the final readiness verdict.
+Use the frontend Control tab to run a quick scan or bounded shadow collection.
+Collection runs append events to `shadow_events.jsonl`, record failed iterations
+as `shadow_scan_error`, and update the readiness verdict shown in the app.
 
 When `--fair` is omitted, shadow mode automatically builds conservative fair
 probability estimates from public orderbook and market data. Estimates include
 source, confidence, and rejection reasons in the event log. Low-confidence
 estimates do not generate candidate trades.
 
-Manual fair probability files are an advanced override for controlled tests:
+Manual fair probability files are an advanced override for controlled tests and
+are not required for normal app usage:
 
 ```json
 {
@@ -125,10 +68,6 @@ Manual fair probability files are an advanced override for controlled tests:
 }
 ```
 
-```bash
-python -m sports_edge_scanner shadow scan --limit 20 --fair fair_probabilities.json --events shadow_events.jsonl
-```
-
 Every candidate is either rejected with explicit risk reasons or converted into
 a simulated limit order and fill record. The report also includes an automatic
 readiness verdict with blockers and thresholds. `READY` means the paper evidence
@@ -136,58 +75,26 @@ is adequate for the next design review; it is not permission to trade live.
 Shadow results are not live fills and should be treated as research evidence
 only.
 
-Create safe starter files:
-
-```bash
-python -m sports_edge_scanner shadow init-config
-```
-
-This writes `shadow_config.json` and `fair_probabilities.example.json` unless they already exist. Use `--force` only when you intentionally want to overwrite them.
-
 ## Live Safety Core
 
-The `live` command group is a safety scaffold for future real execution. In this phase it still does not place real orders, cancel orders, sign payloads, load private keys, or manage wallets.
-
-Create the safe default config:
-
-```bash
-python -m sports_edge_scanner live init-config
-```
-
-Check the config:
-
-```bash
-python -m sports_edge_scanner live check-config --config live_config.json
-```
-
-Run an audited dry-run through the live safety guard:
-
-```bash
-python -m sports_edge_scanner live dry-run --events execution_events.jsonl --confirm-token confirm-live-dry-run
-```
-
-The default config keeps the kill switch enabled, so dry-run execution is rejected until the operator explicitly disables it in a local config file. Real venue execution requires a later authenticated adapter design.
+The live safety layer is a scaffold for future real execution. In this phase it
+still does not place real orders, cancel orders, sign payloads, load private
+keys, or manage wallets. The app shows live safety status as read-only context;
+real venue execution requires a later authenticated execution design.
 
 ## Polymarket Auth Readiness
 
-The `polymarket-auth` command group checks whether a future authenticated adapter is configured safely. It does not place real orders and does not accept private keys or API secrets as command-line arguments.
+Authenticated Polymarket support is readiness-only. It does not place real
+orders and does not accept private keys or API secrets as command-line
+arguments. Credential values must come from environment variables named in
+local config files, and geographic restrictions must block authenticated writes.
 
-Create a non-secret config template:
+## Advanced CLI
 
-```bash
-python -m sports_edge_scanner polymarket-auth init-config
-```
-
-Check local readiness:
-
-```bash
-python -m sports_edge_scanner polymarket-auth check --config polymarket_auth_config.json
-```
-
-Check geographic restriction status:
+The lower-level CLI commands such as `shadow scan`, `shadow watch`, `shadow
+report`, `live dry-run`, and `polymarket-auth check` remain available for tests,
+automation, and debugging. They are not the normal operator workflow. Start with:
 
 ```bash
-python -m sports_edge_scanner polymarket-auth geoblock --json
+python -m sports_edge_scanner app
 ```
-
-Credential values must come from environment variables named in the config. The config file stores only environment variable names and safety flags. If the geoblock check reports blocked, the adapter must reject authenticated writes.

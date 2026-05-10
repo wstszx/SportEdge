@@ -9,3 +9,8 @@ market_snapshots.jsonl
 shadow_events.jsonl
 execution_events.jsonl
 tmp_*_events.jsonl
+shadow_config.json
+fair_probabilities.example.json
+fair_probabilities.json
+live_config.json
+polymarket_auth_config.json
