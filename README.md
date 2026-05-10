@@ -82,3 +82,31 @@ streamlit run dashboard_app.py
 ```
 
 The dashboard reads the same JSONL files as the CLI. It shows overview metrics, latest markets, price history, paper trades, settlements, data-quality checks, and raw report JSON. It is still research-only and does not place orders.
+
+## Shadow Trading Simulation
+
+Shadow mode rehearses live-trading decisions without sending real orders, signing payloads, storing private keys, or controlling funds.
+
+Example fair probability file:
+
+```json
+{
+  "markets": {
+    "example-market-slug": {
+      "Team A": 0.57
+    }
+  },
+  "tokens": {
+    "example-token-id": 0.57
+  }
+}
+```
+
+Run a bounded shadow scan:
+
+```bash
+python -m sports_edge_scanner shadow scan --limit 20 --fair fair_probabilities.json --events shadow_events.jsonl
+python -m sports_edge_scanner shadow report --events shadow_events.jsonl
+```
+
+Every candidate is either rejected with explicit risk reasons or converted into a simulated limit order and fill record. Shadow results are not live fills and should be treated as research evidence only.

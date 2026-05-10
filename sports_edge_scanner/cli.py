@@ -2,10 +2,15 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
+from uuid import uuid4
 
 from sports_edge_scanner.connectors.polymarket import PolymarketClient
+from sports_edge_scanner.connectors.polymarket_clob import PolymarketCLOBClient
+from sports_edge_scanner.core.events import append_event, make_event, read_events
+from sports_edge_scanner.core.fair import FairProbabilityBook, load_fair_probability_book
 from sports_edge_scanner.core.ledger import (
     append_record,
     paper_settlement_record,
@@ -14,6 +19,10 @@ from sports_edge_scanner.core.ledger import (
 )
 from sports_edge_scanner.core.pricing import break_even_probability
 from sports_edge_scanner.core.reports import build_quality_report, build_report
+from sports_edge_scanner.core.risk import RiskConfig, evaluate_candidate_order
+from sports_edge_scanner.core.shadow_execution import simulate_buy_limit_fill
+from sports_edge_scanner.core.shadow_reports import build_shadow_report
+from sports_edge_scanner.core.shadow_signals import candidate_orders_for_market
 from sports_edge_scanner.core.signals import classify_market
 from sports_edge_scanner.core.snapshots import (
     append_snapshots,
@@ -21,7 +30,7 @@ from sports_edge_scanner.core.snapshots import (
     read_snapshots,
     run_snapshot_watch,
 )
-from sports_edge_scanner.models import Market, Signal
+from sports_edge_scanner.models import Market, OrderBook, ShadowOrder, Signal
 
 
 @dataclass(frozen=True)
@@ -333,6 +342,238 @@ def _quality(args: argparse.Namespace) -> int:
     return 0
 
 
+def _order_id(run_id: str, index: int) -> str:
+    return f"{run_id}-shadow-{index}"
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    text = value
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _orderbook_age_seconds(orderbook: OrderBook, now: datetime) -> float | None:
+    parsed = _parse_iso_datetime(orderbook.timestamp)
+    if parsed is None:
+        return None
+    return max(0.0, (now - parsed).total_seconds())
+
+
+def run_shadow_scan(
+    market_client,
+    book_client,
+    fair_book: FairProbabilityBook,
+    risk_config: RiskConfig,
+    limit: int,
+    events_path: Path,
+    run_id: str,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    markets = market_client.fetch_markets(limit=limit)
+    candidate_count = 0
+    accepted_count = 0
+    rejected_count = 0
+    order_index = 0
+    market_exposure: dict[str, float] = {}
+    total_exposure = 0.0
+    current_time = now or datetime.now(timezone.utc)
+
+    for market in markets:
+        books: dict[str, OrderBook] = {}
+        for outcome in market.outcomes:
+            if outcome.token_id:
+                try:
+                    book = book_client.fetch_orderbook(outcome.token_id)
+                    books[outcome.token_id] = book
+                    append_event(
+                        events_path,
+                        make_event(
+                            "orderbook_snapshot",
+                            run_id,
+                            {
+                                "market_id": market.id,
+                                "token_id": outcome.token_id,
+                                **book.to_dict(),
+                            },
+                        ),
+                    )
+                except Exception as exc:
+                    append_event(
+                        events_path,
+                        make_event(
+                            "orderbook_error",
+                            run_id,
+                            {
+                                "market_id": market.id,
+                                "token_id": outcome.token_id,
+                                "error": str(exc),
+                            },
+                        ),
+                    )
+
+        candidates = candidate_orders_for_market(
+            market,
+            fair_book,
+            books,
+            min_edge=risk_config.min_edge,
+            default_notional=risk_config.max_order_notional,
+        )
+        for candidate in candidates:
+            candidate_count += 1
+            append_event(
+                events_path,
+                make_event(
+                    "signal",
+                    run_id,
+                    {"status": "candidate", **candidate.to_dict()},
+                ),
+            )
+            book = books[candidate.token_id]
+            projected_order = ShadowOrder(
+                order_id=_order_id(run_id, order_index + 1),
+                market_id=candidate.market_id,
+                outcome_name=candidate.outcome_name,
+                token_id=candidate.token_id,
+                side="BUY",
+                limit_price=candidate.limit_price,
+                notional=min(
+                    candidate.requested_notional,
+                    risk_config.max_order_notional,
+                    max(
+                        0.0,
+                        risk_config.max_market_exposure
+                        - market_exposure.get(candidate.market_id, 0.0),
+                    ),
+                    max(0.0, risk_config.max_total_exposure - total_exposure),
+                ),
+                source_signal_id=f"{run_id}-signal-{candidate_count}",
+            )
+            simulated_fill = simulate_buy_limit_fill(projected_order, book)
+            decision = evaluate_candidate_order(
+                candidate,
+                book,
+                risk_config,
+                market_exposure=market_exposure.get(candidate.market_id, 0.0),
+                total_exposure=total_exposure,
+                daily_pnl=0.0,
+                market_liquidity=market.liquidity,
+                orderbook_age_seconds=_orderbook_age_seconds(book, current_time),
+                simulated_fill=simulated_fill,
+            )
+            append_event(
+                events_path,
+                make_event(
+                    "risk_decision",
+                    run_id,
+                    {
+                        "market_id": candidate.market_id,
+                        "token_id": candidate.token_id,
+                        **decision.to_dict(),
+                    },
+                ),
+            )
+            if not decision.allowed:
+                rejected_count += 1
+                continue
+
+            accepted_count += 1
+            market_exposure[candidate.market_id] = (
+                market_exposure.get(candidate.market_id, 0.0) + decision.approved_notional
+            )
+            total_exposure += decision.approved_notional
+            order_index += 1
+            order = ShadowOrder(
+                order_id=_order_id(run_id, order_index),
+                market_id=candidate.market_id,
+                outcome_name=candidate.outcome_name,
+                token_id=candidate.token_id,
+                side="BUY",
+                limit_price=candidate.limit_price,
+                notional=decision.approved_notional,
+                source_signal_id=f"{run_id}-signal-{candidate_count}",
+            )
+            append_event(events_path, make_event("shadow_order", run_id, order.to_dict()))
+            fill = simulate_buy_limit_fill(order, book)
+            append_event(
+                events_path,
+                make_event(
+                    "shadow_fill",
+                    run_id,
+                    {
+                        "market_id": candidate.market_id,
+                        "token_id": candidate.token_id,
+                        **fill.to_dict(),
+                    },
+                ),
+            )
+
+    return {
+        "markets": len(markets),
+        "candidate_count": candidate_count,
+        "accepted_order_count": accepted_count,
+        "rejected_order_count": rejected_count,
+        "events_path": str(events_path),
+    }
+
+
+def _load_risk_config(path_value: str) -> RiskConfig:
+    if not path_value:
+        return RiskConfig()
+    payload = json.loads(Path(path_value).read_text(encoding="utf-8"))
+    return RiskConfig(**payload)
+
+
+def _shadow_scan(args: argparse.Namespace) -> int:
+    try:
+        fair_book = (
+            load_fair_probability_book(Path(args.fair))
+            if args.fair
+            else FairProbabilityBook()
+        )
+        summary = run_shadow_scan(
+            market_client=PolymarketClient(),
+            book_client=PolymarketCLOBClient(),
+            fair_book=fair_book,
+            risk_config=_load_risk_config(args.config),
+            limit=args.limit,
+            events_path=Path(args.events),
+            run_id=str(uuid4()),
+        )
+    except Exception as exc:
+        print(f"shadow scan failed: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(summary, indent=2, sort_keys=True))
+    else:
+        print(f"Markets: {summary['markets']}")
+        print(f"Candidates: {summary['candidate_count']}")
+        print(f"Accepted shadow orders: {summary['accepted_order_count']}")
+        print(f"Rejected shadow orders: {summary['rejected_order_count']}")
+        print(f"Events: {summary['events_path']}")
+    return 0
+
+
+def _shadow_report(args: argparse.Namespace) -> int:
+    report = build_shadow_report(read_events(Path(args.events)))
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(f"Candidates: {report['candidate_count']}")
+        print(f"Accepted shadow orders: {report['accepted_order_count']}")
+        print(f"Rejected shadow orders: {report['rejected_order_count']}")
+        print(f"Simulated notional filled: ${report['simulated_notional_filled']:,.2f}")
+        print(f"Average slippage: {report['average_slippage']:.4f}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sports_edge_scanner",
@@ -413,6 +654,28 @@ def build_parser() -> argparse.ArgumentParser:
     quality.add_argument("--snapshots", default="market_snapshots.jsonl")
     quality.add_argument("--json", action="store_true")
     quality.set_defaults(func=_quality)
+
+    shadow = subparsers.add_parser("shadow", help="Run shadow trading simulations.")
+    shadow_subparsers = shadow.add_subparsers(dest="shadow_command", required=True)
+
+    shadow_scan = shadow_subparsers.add_parser(
+        "scan",
+        help="Scan markets and simulate risk-checked shadow orders.",
+    )
+    shadow_scan.add_argument("--limit", type=int, default=20)
+    shadow_scan.add_argument("--fair", default="", help="Fair probability JSON file.")
+    shadow_scan.add_argument("--config", default="", help="Shadow risk config JSON file.")
+    shadow_scan.add_argument("--events", default="shadow_events.jsonl")
+    shadow_scan.add_argument("--json", action="store_true")
+    shadow_scan.set_defaults(func=_shadow_scan)
+
+    shadow_report = shadow_subparsers.add_parser(
+        "report",
+        help="Summarize shadow event logs.",
+    )
+    shadow_report.add_argument("--events", default="shadow_events.jsonl")
+    shadow_report.add_argument("--json", action="store_true")
+    shadow_report.set_defaults(func=_shadow_report)
 
     return parser
 
