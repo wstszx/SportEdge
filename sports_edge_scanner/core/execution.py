@@ -1,5 +1,9 @@
+import json
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
+
+from sports_edge_scanner.core.events import append_event, make_event
 
 
 @dataclass(frozen=True)
@@ -184,3 +188,62 @@ class LiveModeGuard:
             requested_notional=order.notional,
             approved_notional=approved_notional if allowed else 0.0,
         )
+
+
+def write_live_config_template(path: Path, force: bool = False) -> Path:
+    if path.exists() and not force:
+        raise FileExistsError(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(LiveModeConfig().to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def load_live_mode_config(path: Path) -> LiveModeConfig:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return LiveModeConfig(**payload)
+
+
+def _rejected_result(order: ExecutionOrder, decision: GuardDecision) -> ExecutionResult:
+    return ExecutionResult(
+        client_order_id=order.client_order_id,
+        venue_order_id="",
+        status="rejected",
+        filled_notional=0.0,
+        remaining_notional=order.notional,
+        average_price=None,
+        message=", ".join(decision.reasons),
+        raw={"guard_decision": decision.to_dict()},
+    )
+
+
+def run_dry_run_execution(
+    execution_client: ExecutionClient,
+    guard: LiveModeGuard,
+    order: ExecutionOrder,
+    risk_decision,
+    events_path: Path,
+    run_id: str,
+    confirmation_token: str = "",
+) -> ExecutionResult:
+    append_event(events_path, make_event("execution_intent", run_id, order.to_dict()))
+    decision = guard.evaluate(order, risk_decision, confirmation_token=confirmation_token)
+    append_event(
+        events_path,
+        make_event("live_guard_decision", run_id, decision.to_dict()),
+    )
+
+    if not decision.allowed:
+        result = _rejected_result(order, decision)
+        append_event(
+            events_path,
+            make_event("execution_rejected", run_id, result.to_dict()),
+        )
+        return result
+
+    result = execution_client.place_order(order)
+    append_event(events_path, make_event("execution_dry_run", run_id, result.to_dict()))
+    append_event(events_path, make_event("execution_result", run_id, result.to_dict()))
+    return result
