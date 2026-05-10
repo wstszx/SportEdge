@@ -1,5 +1,6 @@
 from typing import Any
 
+from sports_edge_scanner.core.shadow_readiness import evaluate_shadow_readiness
 from sports_edge_scanner.core.shadow_state import build_shadow_state
 
 
@@ -20,7 +21,9 @@ def _warnings(state: dict[str, Any]) -> list[str]:
 
 def build_shadow_report(events: list[dict[str, Any]]) -> dict[str, Any]:
     state = build_shadow_state(events)
-    return {
+    report = {
         **state,
         "data_quality_warnings": _warnings(state),
     }
+    report["readiness"] = evaluate_shadow_readiness(report)
+    return report

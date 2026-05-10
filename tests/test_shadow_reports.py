@@ -101,3 +101,12 @@ def test_shadow_report_warns_when_auto_estimates_are_all_unusable():
     )
 
     assert "no usable model estimates" in report["data_quality_warnings"]
+
+
+def test_shadow_report_includes_readiness_section():
+    report = build_shadow_report([])
+
+    assert report["readiness"]["ready"] is False
+    assert "insufficient shadow runs" in report["readiness"]["blockers"]
+    assert "run_count" in report["readiness"]["metrics"]
+    assert "min_run_count" in report["readiness"]["thresholds"]
