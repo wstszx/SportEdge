@@ -1,5 +1,7 @@
+import argparse
 from pathlib import Path
 
+from sports_edge_scanner.cli import _shadow_watch
 from sports_edge_scanner.core.ledger import (
     append_record,
     paper_settlement_record,
@@ -236,6 +238,50 @@ def _percent(value: float | int | None) -> str:
     if value is None:
         return "n/a"
     return f"{float(value):.2%}"
+
+
+def build_shadow_watch_args(
+    *,
+    limit: int,
+    iterations: int,
+    interval_seconds: float,
+    config_path: str,
+    events_path: str,
+    auto_fair_min_confidence: float,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        limit=limit,
+        iterations=iterations,
+        interval_seconds=interval_seconds,
+        fair="",
+        config=config_path,
+        events=events_path,
+        auto_fair_min_confidence=auto_fair_min_confidence,
+        json=True,
+        shadow_command="watch",
+    )
+
+
+def run_dashboard_shadow_watch(
+    *,
+    limit: int,
+    iterations: int,
+    interval_seconds: float,
+    config_path: str,
+    events_path: str,
+    auto_fair_min_confidence: float,
+    runner=_shadow_watch,
+) -> int:
+    return runner(
+        build_shadow_watch_args(
+            limit=limit,
+            iterations=iterations,
+            interval_seconds=interval_seconds,
+            config_path=config_path,
+            events_path=events_path,
+            auto_fair_min_confidence=auto_fair_min_confidence,
+        )
+    )
 
 
 def _load_state(

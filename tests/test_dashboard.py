@@ -1,6 +1,13 @@
 import pytest
 
-from dashboard_app import UI_TEXT, _label, _localize_json, _translate_value
+from dashboard_app import (
+    UI_TEXT,
+    _label,
+    _localize_json,
+    _translate_value,
+    build_shadow_watch_args,
+    run_dashboard_shadow_watch,
+)
 from sports_edge_scanner.dashboard_data import (
     build_dashboard_state,
     latest_market_rows,
@@ -183,3 +190,45 @@ def test_dashboard_translates_status_reasons_sides_and_json_keys():
     assert localized["交易"][0]["信号状态"] == "候选"
     assert localized["交易"][0]["信号原因"] == "公平概率超过优势阈值"
     assert _localize_json({"markets": []}) == {"市场列表": []}
+
+
+def test_build_shadow_watch_args_maps_ui_values():
+    args = build_shadow_watch_args(
+        limit=5,
+        iterations=3,
+        interval_seconds=0.0,
+        config_path="shadow_config.json",
+        events_path="shadow_events.jsonl",
+        auto_fair_min_confidence=0.8,
+    )
+
+    assert args.shadow_command == "watch"
+    assert args.limit == 5
+    assert args.iterations == 3
+    assert args.interval_seconds == 0.0
+    assert args.config == "shadow_config.json"
+    assert args.events == "shadow_events.jsonl"
+    assert args.auto_fair_min_confidence == 0.8
+    assert args.fair == ""
+    assert args.json is True
+
+
+def test_run_dashboard_shadow_watch_uses_injected_runner():
+    calls = []
+
+    def runner(args):
+        calls.append(args)
+        return 0
+
+    exit_code = run_dashboard_shadow_watch(
+        limit=2,
+        iterations=1,
+        interval_seconds=0.0,
+        config_path="shadow_config.json",
+        events_path="shadow_events.jsonl",
+        auto_fair_min_confidence=0.75,
+        runner=runner,
+    )
+
+    assert exit_code == 0
+    assert calls[0].limit == 2
