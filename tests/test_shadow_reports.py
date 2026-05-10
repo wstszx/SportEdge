@@ -64,3 +64,26 @@ def test_shadow_report_includes_state_and_data_quality_warnings():
     assert "orderbook errors present" in report["data_quality_warnings"]
     assert "rejected orders present" in report["data_quality_warnings"]
     assert "unfilled shadow orders present" in report["data_quality_warnings"]
+
+
+def test_shadow_report_counts_model_estimates_and_reasons():
+    report = build_shadow_report(
+        [
+            {
+                "event_type": "model_estimate",
+                "usable": False,
+                "reasons": ["display price only", "low liquidity"],
+            },
+            {
+                "event_type": "model_estimate",
+                "usable": True,
+                "reasons": ["usable automatic estimate"],
+            },
+        ]
+    )
+
+    assert report["model_estimate_count"] == 2
+    assert report["usable_model_estimate_count"] == 1
+    assert report["unusable_model_estimate_count"] == 1
+    assert report["model_rejections_by_reason"]["display price only"] == 1
+    assert report["model_rejections_by_reason"]["low liquidity"] == 1
