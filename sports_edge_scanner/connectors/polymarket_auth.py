@@ -1,8 +1,11 @@
 import json
 import os
+import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
+
+from sports_edge_scanner.core.execution import ExecutionOrder
 
 
 REDACTED = "<redacted>"
@@ -112,3 +115,49 @@ def write_polymarket_auth_config_template(path: Path, force: bool = False) -> Pa
 def load_polymarket_auth_config(path: Path) -> PolymarketAuthConfig:
     payload = json.loads(path.read_text(encoding="utf-8"))
     return PolymarketAuthConfig(**payload)
+
+
+@dataclass(frozen=True)
+class GeoblockStatus:
+    blocked: bool
+    country: str
+    raw: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class PolymarketGeoblockClient:
+    def __init__(self, url: str = "https://polymarket.com/api/geoblock") -> None:
+        self.url = url
+
+    def check(self) -> GeoblockStatus:
+        request = urllib.request.Request(
+            self.url,
+            headers={"User-Agent": "sports-edge-scanner/0.1.0"},
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("geoblock response must be an object")
+        return GeoblockStatus(
+            blocked=bool(payload.get("blocked")),
+            country=str(payload.get("country") or ""),
+            raw=payload,
+        )
+
+
+def map_execution_order_to_polymarket_args(order: ExecutionOrder) -> dict[str, Any]:
+    if order.order_type != "LIMIT":
+        raise ValueError("unsupported order type")
+    if order.side not in {"BUY", "SELL"}:
+        raise ValueError("unsupported order side")
+    size = order.notional / order.limit_price
+    return {
+        "token_id": order.token_id,
+        "side": order.side,
+        "price": order.limit_price,
+        "size": size,
+        "time_in_force": order.time_in_force,
+        "client_order_id": order.client_order_id,
+    }
