@@ -87,6 +87,17 @@ class SlippyBookClient:
         )
 
 
+class WideBookClient:
+    def fetch_orderbook(self, token_id):
+        return OrderBook(
+            market_id="m1",
+            token_id=token_id,
+            bids=[OrderBookLevel(price=0.35, size=1.0)],
+            asks=[OrderBookLevel(price=0.65, size=1.0)],
+            timestamp="2026-05-10T00:00:00+00:00",
+        )
+
+
 def test_parser_supports_shadow_scan_and_report():
     parser = build_parser()
 
@@ -96,6 +107,17 @@ def test_parser_supports_shadow_scan_and_report():
     assert scan_args.command == "shadow"
     assert scan_args.shadow_command == "scan"
     assert report_args.shadow_command == "report"
+
+
+def test_parser_supports_shadow_scan_without_fair_and_auto_confidence():
+    parser = build_parser()
+
+    args = parser.parse_args(
+        ["shadow", "scan", "--limit", "5", "--auto-fair-min-confidence", "0.8"]
+    )
+
+    assert args.fair == ""
+    assert args.auto_fair_min_confidence == 0.8
 
 
 def test_parser_supports_shadow_init_config():
@@ -239,6 +261,36 @@ def test_run_shadow_scan_without_manual_fair_emits_model_estimates(tmp_path):
     assert summary["model_estimate_count"] == 2
     assert len(estimate_events) == 2
     assert summary["candidate_count"] == 0
+
+
+def test_run_shadow_scan_without_usable_auto_estimates_has_no_candidates(tmp_path):
+    events_path = tmp_path / "shadow_events.jsonl"
+
+    summary = run_shadow_scan(
+        market_client=FakeMarketClient(),
+        book_client=WideBookClient(),
+        fair_book=None,
+        risk_config=RiskConfig(min_edge=0.03),
+        limit=5,
+        events_path=events_path,
+        run_id="run-1",
+        auto_fair_config=AutoFairConfig(min_confidence=0.75),
+        now=datetime(2026, 5, 10, 0, 0, tzinfo=timezone.utc),
+    )
+
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    estimate_events = [
+        event for event in events if event["event_type"] == "model_estimate"
+    ]
+
+    assert summary["candidate_count"] == 0
+    assert all(not event["usable"] for event in estimate_events)
+    assert {
+        reason for event in estimate_events for reason in event["reasons"]
+    } >= {"wide spread", "thin top of book"}
 
 
 def test_run_shadow_scan_logs_orderbooks_and_tracks_market_exposure(tmp_path):

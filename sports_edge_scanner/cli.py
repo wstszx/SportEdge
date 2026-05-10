@@ -25,7 +25,8 @@ from sports_edge_scanner.core.execution import (
     run_dry_run_execution,
     write_live_config_template,
 )
-from sports_edge_scanner.core.fair import FairProbabilityBook, load_fair_probability_book
+from sports_edge_scanner.core.auto_fair import AutoFairConfig
+from sports_edge_scanner.core.fair import load_fair_probability_book
 from sports_edge_scanner.core.ledger import (
     append_record,
     paper_settlement_record,
@@ -377,7 +378,7 @@ def _shadow_scan(args: argparse.Namespace) -> int:
         fair_book = (
             load_fair_probability_book(Path(args.fair))
             if args.fair
-            else FairProbabilityBook()
+            else None
         )
         summary = run_shadow_scan(
             market_client=PolymarketClient(),
@@ -387,6 +388,9 @@ def _shadow_scan(args: argparse.Namespace) -> int:
             limit=args.limit,
             events_path=Path(args.events),
             run_id=str(uuid4()),
+            auto_fair_config=AutoFairConfig(
+                min_confidence=args.auto_fair_min_confidence,
+            ),
         )
     except Exception as exc:
         print(f"shadow scan failed: {exc}", file=sys.stderr)
@@ -399,6 +403,11 @@ def _shadow_scan(args: argparse.Namespace) -> int:
         print(f"Candidates: {summary['candidate_count']}")
         print(f"Accepted shadow orders: {summary['accepted_order_count']}")
         print(f"Rejected shadow orders: {summary['rejected_order_count']}")
+        print(f"Model estimates: {summary.get('model_estimate_count', 0)}")
+        print(
+            "Usable model estimates: "
+            f"{summary.get('usable_model_estimate_count', 0)}"
+        )
         print(f"Events: {summary['events_path']}")
     return 0
 
@@ -719,6 +728,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     shadow_scan.add_argument("--limit", type=int, default=20)
     shadow_scan.add_argument("--fair", default="", help="Fair probability JSON file.")
+    shadow_scan.add_argument("--auto-fair-min-confidence", type=float, default=0.75)
     shadow_scan.add_argument("--config", default="", help="Shadow risk config JSON file.")
     shadow_scan.add_argument("--events", default="shadow_events.jsonl")
     shadow_scan.add_argument("--json", action="store_true")
