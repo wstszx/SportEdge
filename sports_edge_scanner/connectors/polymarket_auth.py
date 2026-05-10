@@ -5,7 +5,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from sports_edge_scanner.core.execution import ExecutionOrder
+from sports_edge_scanner.core.execution import (
+    ExecutionOrder,
+    ExecutionOrderStatus,
+    ExecutionResult,
+)
 
 
 REDACTED = "<redacted>"
@@ -161,3 +165,125 @@ def map_execution_order_to_polymarket_args(order: ExecutionOrder) -> dict[str, A
         "time_in_force": order.time_in_force,
         "client_order_id": order.client_order_id,
     }
+
+
+def _safe_error_message(status: str) -> str:
+    return status
+
+
+def _rejected_result(order: ExecutionOrder, status: str) -> ExecutionResult:
+    return ExecutionResult(
+        client_order_id=order.client_order_id,
+        venue_order_id="",
+        status=status,
+        filled_notional=0.0,
+        remaining_notional=order.notional,
+        average_price=None,
+        message=_safe_error_message(status),
+        raw={},
+    )
+
+
+class PolymarketAuthenticatedExecutionClient:
+    def __init__(
+        self,
+        credential_provider: CredentialProvider,
+        sdk_client_factory,
+        geoblock_client: PolymarketGeoblockClient,
+        allow_live_writes: bool = False,
+    ) -> None:
+        self.credential_provider = credential_provider
+        self.sdk_client_factory = sdk_client_factory
+        self.geoblock_client = geoblock_client
+        self.allow_live_writes = allow_live_writes
+
+    def _sdk(self):
+        credentials = self.credential_provider.load()
+        return self.sdk_client_factory(credentials)
+
+    def place_order(self, order: ExecutionOrder) -> ExecutionResult:
+        if not self.allow_live_writes:
+            return _rejected_result(order, "live_writes_disabled")
+        try:
+            geoblock = self.geoblock_client.check()
+            if geoblock.blocked:
+                return _rejected_result(order, "geoblocked")
+            sdk = self._sdk()
+            response = sdk.post_order(**map_execution_order_to_polymarket_args(order))
+            if not isinstance(response, dict):
+                raise ValueError("SDK response must be an object")
+            venue_order_id = str(response.get("orderID") or response.get("id") or "")
+            status = str(response.get("status") or "submitted")
+            return ExecutionResult(
+                client_order_id=order.client_order_id,
+                venue_order_id=venue_order_id,
+                status=status,
+                filled_notional=0.0,
+                remaining_notional=order.notional,
+                average_price=None,
+                message=status,
+                raw={"sdk_status": status},
+            )
+        except ValueError as exc:
+            if "unsupported order" in str(exc):
+                return _rejected_result(order, "unsupported_order")
+            return _rejected_result(order, "sdk_error")
+        except Exception:
+            return _rejected_result(order, "sdk_error")
+
+    def cancel_order(self, order_id: str) -> ExecutionResult:
+        if not self.allow_live_writes:
+            return ExecutionResult(
+                client_order_id=order_id,
+                venue_order_id=order_id,
+                status="live_writes_disabled",
+                filled_notional=0.0,
+                remaining_notional=0.0,
+                average_price=None,
+                message="live_writes_disabled",
+                raw={},
+            )
+        try:
+            response = self._sdk().cancel(order_id)
+            status = "canceled" if isinstance(response, dict) else "submitted"
+            return ExecutionResult(
+                client_order_id=order_id,
+                venue_order_id=order_id,
+                status=status,
+                filled_notional=0.0,
+                remaining_notional=0.0,
+                average_price=None,
+                message=status,
+                raw={"sdk_status": status},
+            )
+        except Exception:
+            return ExecutionResult(
+                client_order_id=order_id,
+                venue_order_id=order_id,
+                status="sdk_error",
+                filled_notional=0.0,
+                remaining_notional=0.0,
+                average_price=None,
+                message="sdk_error",
+                raw={},
+            )
+
+    def get_order(self, order_id: str) -> ExecutionOrderStatus:
+        try:
+            response = self._sdk().get_order(order_id)
+            if not isinstance(response, dict):
+                raise ValueError("SDK response must be an object")
+            status = str(response.get("status") or "unknown")
+            return ExecutionOrderStatus(
+                client_order_id=order_id,
+                venue_order_id=str(response.get("id") or order_id),
+                status=status,
+                raw={"sdk_status": status},
+            )
+        except Exception:
+            return ExecutionOrderStatus(
+                client_order_id=order_id,
+                venue_order_id=order_id,
+                status="sdk_error",
+                raw={},
+            )
