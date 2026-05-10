@@ -142,3 +142,27 @@ python -m sports_edge_scanner live dry-run --events execution_events.jsonl --con
 ```
 
 The default config keeps the kill switch enabled, so dry-run execution is rejected until the operator explicitly disables it in a local config file. Real venue execution requires a later authenticated adapter design.
+
+## Polymarket Auth Readiness
+
+The `polymarket-auth` command group checks whether a future authenticated adapter is configured safely. It does not place real orders and does not accept private keys or API secrets as command-line arguments.
+
+Create a non-secret config template:
+
+```bash
+python -m sports_edge_scanner polymarket-auth init-config
+```
+
+Check local readiness:
+
+```bash
+python -m sports_edge_scanner polymarket-auth check --config polymarket_auth_config.json
+```
+
+Check geographic restriction status:
+
+```bash
+python -m sports_edge_scanner polymarket-auth geoblock --json
+```
+
+Credential values must come from environment variables named in the config. The config file stores only environment variable names and safety flags. If the geoblock check reports blocked, the adapter must reject authenticated writes.
