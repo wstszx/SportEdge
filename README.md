@@ -75,13 +75,31 @@ Install the optional dashboard dependencies:
 python -m pip install -e .[dashboard]
 ```
 
-Launch the local research UI:
+Launch the local frontend page:
 
 ```bash
-streamlit run dashboard_app.py
+python -m sports_edge_scanner app
 ```
 
-The dashboard reads the same JSONL files as the CLI. It shows overview metrics, latest markets, price history, paper trades, settlements, data-quality checks, and raw report JSON. It is still research-only and does not place orders.
+To collect bounded shadow evidence before opening the page:
+
+```bash
+python -m sports_edge_scanner app --shadow-watch --watch-iterations 20 --watch-interval-seconds 1800
+```
+
+To open the page in live-readiness context:
+
+```bash
+python -m sports_edge_scanner app --live
+```
+
+`--live` only changes the operator context and prints a safety notice. It does
+not enable live execution or place real orders.
+
+The dashboard reads the same JSONL files as the CLI. It shows overview metrics,
+latest markets, price history, paper trades, settlements, data-quality checks,
+shadow readiness, and raw report JSON. It is still research-only and does not
+place orders.
 
 ## Shadow Trading Simulation
 
