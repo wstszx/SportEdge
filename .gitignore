@@ -6,3 +6,6 @@ output/
 .tmp-*.jsonl
 paper_trades.jsonl
 market_snapshots.jsonl
+shadow_events.jsonl
+execution_events.jsonl
+tmp_*_events.jsonl
