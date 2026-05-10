@@ -16,6 +16,7 @@ from sports_edge_scanner.connectors.polymarket_auth import (
 )
 from sports_edge_scanner.connectors.polymarket_clob import PolymarketCLOBClient
 from sports_edge_scanner.core.events import read_events
+from sports_edge_scanner.core.app_launcher import AppLaunchConfig, launch_app
 from sports_edge_scanner.core.execution import (
     DryRunExecutionClient,
     ExecutionOrder,
@@ -365,6 +366,36 @@ def _quality(args: argparse.Namespace) -> int:
                 f"{market['title']}"
             )
     return 0
+
+
+def _app(args: argparse.Namespace) -> int:
+    if args.live:
+        print("Live mode UI only: real orders remain disabled.")
+
+    if args.shadow_watch:
+        watch_args = argparse.Namespace(
+            limit=args.watch_limit,
+            iterations=args.watch_iterations,
+            interval_seconds=args.watch_interval_seconds,
+            fair=args.fair,
+            config=args.shadow_config,
+            events=args.shadow_events,
+            auto_fair_min_confidence=args.auto_fair_min_confidence,
+            json=args.json,
+            shadow_command="watch",
+        )
+        watch_exit_code = _shadow_watch(watch_args)
+        if watch_exit_code != 0:
+            return watch_exit_code
+
+    return launch_app(
+        AppLaunchConfig(
+            dashboard_path=Path(args.dashboard),
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+    )
 
 
 def _load_risk_config(path_value: str) -> RiskConfig:
@@ -780,6 +811,23 @@ def build_parser() -> argparse.ArgumentParser:
     quality.add_argument("--snapshots", default="market_snapshots.jsonl")
     quality.add_argument("--json", action="store_true")
     quality.set_defaults(func=_quality)
+
+    app = subparsers.add_parser("app", help="Launch the local dashboard app.")
+    app.add_argument("--dashboard", default="dashboard_app.py")
+    app.add_argument("--host", default="localhost")
+    app.add_argument("--port", type=int, default=8501)
+    app.add_argument("--no-browser", action="store_true")
+    app.add_argument("--live", action="store_true")
+    app.add_argument("--shadow-watch", action="store_true")
+    app.add_argument("--watch-limit", type=int, default=20)
+    app.add_argument("--watch-iterations", type=int, default=20)
+    app.add_argument("--watch-interval-seconds", type=float, default=1800.0)
+    app.add_argument("--shadow-config", default="shadow_config.json")
+    app.add_argument("--shadow-events", default="shadow_events.jsonl")
+    app.add_argument("--fair", default="")
+    app.add_argument("--auto-fair-min-confidence", type=float, default=0.75)
+    app.add_argument("--json", action="store_true")
+    app.set_defaults(func=_app)
 
     shadow = subparsers.add_parser("shadow", help="Run shadow trading simulations.")
     shadow_subparsers = shadow.add_subparsers(dest="shadow_command", required=True)

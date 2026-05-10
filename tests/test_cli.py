@@ -1,6 +1,7 @@
 import pytest
 
 from sports_edge_scanner.cli import (
+    _app,
     build_parser,
     fair_probabilities_for_market,
     market_snapshot,
@@ -143,3 +144,66 @@ def test_parser_supports_paper_settle_command():
     assert args.market == "Market 1"
     assert args.market_id == "m1"
     assert args.winning_side == "YES"
+
+
+def test_parser_supports_app_command():
+    parser = build_parser()
+
+    args = parser.parse_args(
+        ["app", "--host", "127.0.0.1", "--port", "8502", "--no-browser", "--live"]
+    )
+
+    assert args.command == "app"
+    assert args.host == "127.0.0.1"
+    assert args.port == 8502
+    assert args.no_browser is True
+    assert args.live is True
+
+
+def test_app_command_launches_dashboard(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        "sports_edge_scanner.cli.launch_app",
+        lambda config: calls.append(config) or 0,
+    )
+
+    parser = build_parser()
+    args = parser.parse_args(["app", "--host", "127.0.0.1", "--port", "8502"])
+
+    assert _app(args) == 0
+    assert calls[0].host == "127.0.0.1"
+    assert calls[0].port == 8502
+
+
+def test_app_command_runs_shadow_watch_before_dashboard(monkeypatch):
+    calls = []
+
+    def fake_shadow_watch(args):
+        calls.append(("watch", args.shadow_command))
+        return 0
+
+    def fake_launch_app(config):
+        calls.append(("app", config.port))
+        return 0
+
+    monkeypatch.setattr("sports_edge_scanner.cli._shadow_watch", fake_shadow_watch)
+    monkeypatch.setattr("sports_edge_scanner.cli.launch_app", fake_launch_app)
+
+    parser = build_parser()
+    args = parser.parse_args(["app", "--shadow-watch", "--watch-iterations", "1"])
+
+    assert _app(args) == 0
+    assert calls == [("watch", "watch"), ("app", 8501)]
+
+
+def test_app_live_flag_prints_safety_message(monkeypatch, capsys):
+    monkeypatch.setattr("sports_edge_scanner.cli.launch_app", lambda config: 0)
+
+    parser = build_parser()
+    args = parser.parse_args(["app", "--live"])
+
+    assert _app(args) == 0
+    output = capsys.readouterr().out
+    assert "Live mode UI only" in output
+    assert "real orders remain disabled" in output
