@@ -107,3 +107,80 @@ class DryRunExecutionClient:
             status="dry_run_unknown",
             raw={},
         )
+
+
+@dataclass(frozen=True)
+class LiveModeConfig:
+    mode: str = "dry_run"
+    live_enabled: bool = False
+    require_confirmation_token: bool = True
+    confirmation_token: str = "confirm-live-dry-run"
+    kill_switch_enabled: bool = True
+    max_order_notional: float = 10.0
+    max_market_exposure: float = 25.0
+    max_total_exposure: float = 100.0
+    daily_loss_limit: float = 25.0
+    allowed_venues: list[str] = field(default_factory=lambda: ["polymarket"])
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class GuardDecision:
+    allowed: bool
+    reasons: list[str]
+    mode: str
+    requested_notional: float
+    approved_notional: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class LiveModeGuard:
+    def __init__(self, config: LiveModeConfig) -> None:
+        self.config = config
+
+    def evaluate(
+        self,
+        order: ExecutionOrder,
+        risk_decision,
+        confirmation_token: str = "",
+    ) -> GuardDecision:
+        reasons: list[str] = []
+        approved_notional = min(order.notional, risk_decision.approved_notional)
+
+        if self.config.kill_switch_enabled:
+            reasons.append("kill switch enabled")
+        if self.config.mode not in {"dry_run", "live"}:
+            reasons.append("unknown live mode")
+        if self.config.mode == "live" and not self.config.live_enabled:
+            reasons.append("live mode disabled")
+        if self.config.mode == "live":
+            reasons.append("live mode is not implemented")
+        if (
+            self.config.require_confirmation_token
+            and confirmation_token != self.config.confirmation_token
+        ):
+            reasons.append("confirmation token mismatch")
+        if order.venue not in self.config.allowed_venues:
+            reasons.append("venue not allowed")
+        if not risk_decision.allowed:
+            reasons.append("risk decision rejected")
+        if order.notional > self.config.max_order_notional:
+            reasons.append("max_order_notional exceeded")
+        if approved_notional <= 0.0:
+            reasons.append("no approved notional")
+
+        allowed = not reasons and self.config.mode == "dry_run"
+        if allowed:
+            reasons.append("allowed dry-run execution")
+
+        return GuardDecision(
+            allowed=allowed,
+            reasons=reasons,
+            mode=self.config.mode,
+            requested_notional=order.notional,
+            approved_notional=approved_notional if allowed else 0.0,
+        )
