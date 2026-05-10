@@ -110,3 +110,10 @@ def test_shadow_report_includes_readiness_section():
     assert "insufficient shadow runs" in report["readiness"]["blockers"]
     assert "run_count" in report["readiness"]["metrics"]
     assert "min_run_count" in report["readiness"]["thresholds"]
+
+
+def test_shadow_report_includes_strategy_diagnostics():
+    report = build_shadow_report([])
+
+    assert report["strategy_diagnostics"]["status"] == "collecting_data"
+    assert "collect more shadow runs" in report["strategy_diagnostics"]["next_actions"]
