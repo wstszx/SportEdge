@@ -29,6 +29,7 @@ from sports_edge_scanner.core.execution import (
     run_live_scan,
     write_live_config_template,
 )
+from sports_edge_scanner.core.live_status import build_live_status
 from sports_edge_scanner.core.auto_fair import AutoFairConfig
 from sports_edge_scanner.core.fair import load_fair_probability_book
 from sports_edge_scanner.core.ledger import (
@@ -688,11 +689,16 @@ def _live_dry_run(args: argparse.Namespace) -> int:
 
 def _live_run(args: argparse.Namespace) -> int:
     try:
+        status = build_live_status(
+            live_config_path=args.live_config,
+            auth_config_path=args.auth_config,
+        )
+        if not status["ready"]:
+            blockers = ", ".join(str(item) for item in status["blockers"])
+            print(f"live run failed: {blockers}", file=sys.stderr)
+            return 1
         live_config = _load_live_config(args.live_config)
         auth_config = load_polymarket_auth_config(Path(args.auth_config))
-        if not auth_config.enabled or not auth_config.allow_live_writes:
-            print("live run failed: Polymarket live writes are not enabled.", file=sys.stderr)
-            return 1
         execution_client = PolymarketAuthenticatedExecutionClient(
             credential_provider=EnvironmentPolymarketCredentialProvider(auth_config),
             sdk_client_factory=lambda credentials: build_py_clob_client_v2(

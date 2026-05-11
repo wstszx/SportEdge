@@ -1,6 +1,6 @@
 # Shadow Trading Runbook
 
-Sports Edge Scanner shadow mode is a research workflow. It does not place real orders, sign payloads, manage wallets, cancel orders, or control funds.
+Sports Edge Scanner shadow mode is a research workflow. It does not place real orders unless you explicitly switch the frontend to live mode and enable both live safety and Polymarket auth configs. Paper/shadow mode does not submit orders, cancel orders, or control funds.
 
 ## 1. Start The App
 
@@ -9,7 +9,9 @@ python -m sports_edge_scanner app
 ```
 
 Use the Control tab to switch the running mode directly: `仅纸面`, `仅实盘`,
-or `纸面+实盘`. The app is the normal operator workflow.
+or `纸面+实盘`. The app is the normal operator workflow. Use the `实盘执行`
+tab to review live readiness, config blockers, submitted orders, rejected
+orders, and the latest execution status.
 
 ## 2. Choose A Running Mode
 
@@ -45,7 +47,8 @@ The Shadow and Control tabs show the readiness verdict:
 - `NOT READY`: blockers explain what evidence is missing or unreliable.
 
 `READY` is not enough by itself to place live orders. Live execution also
-requires explicitly enabled live and Polymarket auth configs.
+requires explicitly enabled live and Polymarket auth configs. The `实盘执行`
+tab shows those live-specific blockers separately from paper readiness.
 
 ## 4. Optional Manual Fair Override
 

@@ -6,6 +6,7 @@ from dashboard_app import (
     RUN_MODE_PAPER,
     RUN_MODE_PAPER_AND_LIVE,
     UI_TEXT,
+    build_dashboard_live_state,
     build_live_run_args,
     _label,
     _localize_json,
@@ -156,6 +157,7 @@ def test_build_dashboard_state_includes_shadow_report_and_tables():
 
 def test_dashboard_ui_text_is_localized_to_chinese():
     assert UI_TEXT["app_title"] == "体育下注研究仪表盘"
+    assert "显式启用实盘配置" in UI_TEXT["app_caption"]
     assert UI_TEXT["sidebar_help"] == "数据会在启动所选运行模式时自动采集；这些路径通常保持默认即可。"
     assert _label("realized_pnl") == "已结算盈亏"
     assert _label("realized_roi") == "已结算收益率"
@@ -177,6 +179,16 @@ def test_dashboard_has_control_ui_labels():
     assert _label("start_selected_run_mode") == "启动所选模式"
     assert _label("live_safety_status") == "实盘安全状态"
     assert "复用纸面交易" in _label("live_safety_message")
+
+
+def test_dashboard_has_live_execution_ui_labels():
+    assert _label("live_execution_tab") == "实盘执行"
+    assert _label("live_execution_overview") == "实盘执行概览"
+    assert _label("submitted_live_orders") == "已提交实盘订单"
+    assert _label("rejected_live_orders") == "已拒绝实盘订单"
+    assert _label("latest_execution_status") == "最近执行状态"
+    assert _label("live_ready") == "实盘就绪"
+    assert _label("live_blockers") == "实盘阻断原因"
 
 
 def test_dashboard_has_operator_run_mode_labels():
@@ -289,6 +301,54 @@ def test_build_live_run_args_maps_ui_values():
     assert args.limit == 5
     assert args.auto_fair_min_confidence == 0.8
     assert args.json is True
+
+
+def test_build_dashboard_live_state_combines_status_and_execution_report(tmp_path):
+    events_path = tmp_path / "execution_events.jsonl"
+    live_config_path = tmp_path / "live_config.json"
+    auth_config_path = tmp_path / "polymarket_auth_config.json"
+    live_config_path.write_text(
+        '{"mode":"live","live_enabled":true,"require_confirmation_token":false,'
+        '"confirmation_token":"confirm-live","kill_switch_enabled":false,'
+        '"max_order_notional":10.0,"max_market_exposure":25.0,'
+        '"max_total_exposure":100.0,"daily_loss_limit":25.0,'
+        '"allowed_venues":["polymarket"]}',
+        encoding="utf-8",
+    )
+    auth_config_path.write_text(
+        '{"enabled":true,"host":"https://clob.polymarket.com","chain_id":137,'
+        '"signature_type":0,"funder_env":"FUNDER","private_key_env":"PRIVATE_KEY",'
+        '"api_key_env":"API_KEY","api_secret_env":"API_SECRET",'
+        '"api_passphrase_env":"API_PASSPHRASE","require_geoblock_check":true,'
+        '"allow_live_writes":true}',
+        encoding="utf-8",
+    )
+    events_path.write_text(
+        '{"event_type":"execution_result","run_id":"run-1",'
+        '"timestamp":"2026-05-10T00:00:00+00:00",'
+        '"client_order_id":"client-1","venue_order_id":"venue-1",'
+        '"status":"submitted","filled_notional":0.0,"remaining_notional":10.0,'
+        '"average_price":null,"message":"submitted"}\n',
+        encoding="utf-8",
+    )
+
+    state = build_dashboard_live_state(
+        execution_events_path=events_path,
+        live_config_path=live_config_path,
+        auth_config_path=auth_config_path,
+        environ={
+            "FUNDER": "0xabc",
+            "PRIVATE_KEY": "secret-private-key",
+            "API_KEY": "secret-api-key",
+            "API_SECRET": "secret-api-secret",
+            "API_PASSPHRASE": "secret-passphrase",
+        },
+    )
+
+    assert state["live_status"]["ready"] is True
+    assert state["execution_report"]["submitted_order_count"] == 1
+    assert state["execution_report"]["latest_status"] == "submitted"
+    assert "secret-private-key" not in str(state)
 
 
 def test_run_dashboard_shadow_watch_uses_injected_runner():

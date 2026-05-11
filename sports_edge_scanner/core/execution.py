@@ -281,6 +281,16 @@ def _execution_order_id(run_id: str, index: int) -> str:
     return f"{run_id}-live-{index}"
 
 
+LIVE_SUBMITTED_STATUSES = {
+    "submitted",
+    "accepted",
+    "open",
+    "matched",
+    "filled",
+    "partially_filled",
+}
+
+
 def run_live_scan(
     market_client: Any,
     book_client: Any,
@@ -323,7 +333,7 @@ def run_live_scan(
             confirmation_token=confirmation_token,
             accepted_event_type="execution_order",
         )
-        if result.status == "rejected":
+        if result.status not in LIVE_SUBMITTED_STATUSES:
             return {
                 "accepted": False,
                 "counts": {"execution_rejected_count": 1},

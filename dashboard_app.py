@@ -9,6 +9,8 @@ from sports_edge_scanner.core.ledger import (
     read_records,
 )
 from sports_edge_scanner.core.events import read_events
+from sports_edge_scanner.core.execution_reports import build_execution_report
+from sports_edge_scanner.core.live_status import build_live_status
 from sports_edge_scanner.core.snapshots import read_snapshots
 from sports_edge_scanner.dashboard_data import build_dashboard_state, price_history_for_market
 
@@ -22,7 +24,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised by manual lau
 
 UI_TEXT = {
     "app_title": "体育下注研究仪表盘",
-    "app_caption": "本地研究工具。不会自动下注，也不会操作钱包。",
+    "app_caption": "本地研究与执行工具。只有显式启用实盘配置后才会提交真实订单。",
     "data": "数据",
     "ledger_path": "交易记录文件",
     "snapshot_path": "市场快照文件",
@@ -42,6 +44,7 @@ UI_TEXT = {
     "settlements_tab": "结算",
     "quality_tab": "数据质量",
     "shadow_tab": "影子交易",
+    "live_execution_tab": "实盘执行",
     "control_tab": "控制台",
     "raw_report_tab": "原始报告",
     "latest_markets": "最新市场",
@@ -103,6 +106,15 @@ UI_TEXT = {
     "readiness_blockers": "准入阻断原因",
     "live_safety_status": "实盘安全状态",
     "live_safety_message": "实盘模式会复用纸面交易的信号、风控和订单生成流程；只有执行端会在配置启用后提交真实订单。",
+    "live_execution_overview": "实盘执行概览",
+    "submitted_live_orders": "已提交实盘订单",
+    "rejected_live_orders": "已拒绝实盘订单",
+    "latest_execution_status": "最近执行状态",
+    "live_ready": "实盘就绪",
+    "live_blockers": "实盘阻断原因",
+    "live_execution_orders": "实盘订单明细",
+    "live_execution_raw_report": "实盘原始报告",
+    "run_count": "运行次数",
     "accepted_orders": "通过订单",
     "rejected_orders": "拒绝订单",
     "filled_notional": "已成交名义金额",
@@ -185,6 +197,24 @@ TABLE_LABELS = {
     "outcome_name": "结果",
     "token_id": "Token ID",
     "status": "状态",
+    "latest_status": "最近状态",
+    "venue_order_id": "交易所订单 ID",
+    "client_order_id": "客户端订单 ID",
+    "guard_allowed": "安全检查允许",
+    "guard_reasons": "安全检查原因",
+    "remaining_notional": "剩余名义金额",
+    "message": "消息",
+    "live_config_loaded": "实盘配置已加载",
+    "auth_config_loaded": "认证配置已加载",
+    "mode": "模式",
+    "live_enabled": "实盘已启用",
+    "kill_switch_enabled": "熔断开关启用",
+    "require_confirmation_token": "需要确认令牌",
+    "auth_enabled": "认证已启用",
+    "allow_live_writes": "允许实盘写入",
+    "require_geoblock_check": "需要地区限制检查",
+    "credential_status": "凭证状态",
+    "missing_credential_envs": "缺失凭证环境变量",
     "filled_notional": "已成交名义金额",
     "unfilled_notional": "未成交名义金额",
     "average_price": "平均价格",
@@ -241,6 +271,24 @@ VALUE_LABELS = {
     "needs_execution_samples": "需要执行样本",
     "execution_quality_issue": "执行数据质量问题",
     "healthy": "健康",
+    "submitted": "已提交",
+    "rejected": "已拒绝",
+    "dry_run_accepted": "模拟执行已接受",
+    "present": "已提供",
+    "missing": "缺失",
+    "live": "实盘",
+    "dry_run": "模拟执行",
+    "live config missing": "缺少实盘安全配置",
+    "auth config missing": "缺少 Polymarket 实盘配置",
+    "live mode is not live": "实盘安全配置未设为 live",
+    "live mode disabled": "实盘开关未启用",
+    "kill switch enabled": "熔断开关已启用",
+    "confirmation token required": "仍要求确认令牌",
+    "auth config disabled": "Polymarket 实盘配置未启用",
+    "live writes disabled": "实盘写入未启用",
+    "credential environment missing": "凭证环境变量缺失",
+    "allowed live execution": "允许实盘执行",
+    "allowed dry-run execution": "允许模拟执行",
     "insufficient sample size": "样本数量不足",
     "execution data quality issue": "执行数据质量问题",
     "conservative auto fair is not producing edge": "保守自动概率未产生优势",
@@ -462,6 +510,25 @@ def _load_state(
     )
 
 
+def build_dashboard_live_state(
+    *,
+    execution_events_path: str | Path,
+    live_config_path: str | Path,
+    auth_config_path: str | Path,
+    environ=None,
+) -> dict[str, object]:
+    execution_events = read_events(Path(execution_events_path))
+    return {
+        "live_status": build_live_status(
+            live_config_path=live_config_path,
+            auth_config_path=auth_config_path,
+            environ=environ,
+        ),
+        "execution_report": build_execution_report(execution_events),
+        "execution_events": execution_events,
+    }
+
+
 def _render_overview(state: dict) -> None:
     report = state["report"]
     quality = state["quality"]
@@ -596,6 +663,32 @@ def _render_readiness(readiness: dict) -> None:
         )
 
 
+def _render_live_status(status: dict) -> None:
+    st.metric(_label("live_ready"), "READY" if status.get("ready") else "NOT READY")
+    blockers = status.get("blockers") or []
+    if blockers:
+        st.warning(
+            f"{_label('live_blockers')}: "
+            + " | ".join(_translate_value(item) for item in blockers)
+        )
+    rows = [
+        {
+            "live_config_loaded": status.get("live_config_loaded"),
+            "auth_config_loaded": status.get("auth_config_loaded"),
+            "mode": status.get("mode"),
+            "live_enabled": status.get("live_enabled"),
+            "kill_switch_enabled": status.get("kill_switch_enabled"),
+            "auth_enabled": status.get("auth_enabled"),
+            "allow_live_writes": status.get("allow_live_writes"),
+            "credential_status": status.get("credential_status"),
+            "missing_credential_envs": ", ".join(
+                status.get("missing_credential_envs") or []
+            ),
+        }
+    ]
+    st.dataframe(_display_rows(rows), width="stretch", hide_index=True)
+
+
 def _render_strategy_diagnostics(report: dict) -> None:
     diagnostics = report.get("strategy_diagnostics") or {}
     st.subheader(_label("strategy_diagnostics"))
@@ -723,6 +816,32 @@ def _render_controls(
     st.info(_label("live_safety_message"))
 
 
+def _render_live_execution(live_state: dict) -> None:
+    report = live_state["execution_report"]
+    st.subheader(_label("live_safety_status"))
+    _render_live_status(live_state["live_status"])
+    st.subheader(_label("live_execution_overview"))
+    columns = st.columns(5)
+    columns[0].metric(_label("run_count"), f"{report['run_count']:,}")
+    columns[1].metric(
+        _label("submitted_live_orders"),
+        f"{report['submitted_order_count']:,}",
+    )
+    columns[2].metric(
+        _label("rejected_live_orders"),
+        f"{report['rejected_order_count']:,}",
+    )
+    columns[3].metric(_label("filled_notional"), _money(report["filled_notional"]))
+    columns[4].metric(
+        _label("latest_execution_status"),
+        _translate_value(report.get("latest_status")),
+    )
+    st.subheader(_label("live_execution_orders"))
+    st.dataframe(_display_rows(report["orders"]), width="stretch", hide_index=True)
+    st.subheader(_label("live_execution_raw_report"))
+    st.json(_localize_json(report))
+
+
 def _render_shadow(state: dict) -> None:
     report = state["shadow_report"]
     st.subheader(_label("shadow_overview"))
@@ -807,11 +926,25 @@ def main() -> None:
             execution_events_path = Path(
                 st.text_input(_label("execution_events_path"), "execution_events.jsonl")
             )
+            live_config_path = Path(
+                st.text_input(_label("live_config_path"), "live_config.json")
+            )
+            auth_config_path = Path(
+                st.text_input(
+                    _label("polymarket_auth_config_path"),
+                    "polymarket_auth_config.json",
+                )
+            )
 
     records, snapshots, _shadow_events, state = _load_state(
         ledger_path,
         snapshot_path,
         shadow_events_path,
+    )
+    live_state = build_dashboard_live_state(
+        execution_events_path=execution_events_path,
+        live_config_path=live_config_path,
+        auth_config_path=auth_config_path,
     )
     _render_overview(state)
 
@@ -821,6 +954,7 @@ def main() -> None:
         settlements_tab,
         quality_tab,
         shadow_tab,
+        live_execution_tab,
         control_tab,
         raw_tab,
     ) = st.tabs(
@@ -830,6 +964,7 @@ def main() -> None:
             _label("settlements_tab"),
             _label("quality_tab"),
             _label("shadow_tab"),
+            _label("live_execution_tab"),
             _label("control_tab"),
             _label("raw_report_tab"),
         ]
@@ -844,6 +979,8 @@ def main() -> None:
         _render_quality(state)
     with shadow_tab:
         _render_shadow(state)
+    with live_execution_tab:
+        _render_live_execution(live_state)
     with control_tab:
         _render_controls(state, snapshot_path, shadow_events_path, execution_events_path)
     with raw_tab:

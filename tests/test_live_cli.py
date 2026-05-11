@@ -1,5 +1,9 @@
 import json
 
+from sports_edge_scanner.connectors.polymarket_auth import (
+    PolymarketAuthConfig,
+    write_polymarket_auth_config_template,
+)
 from sports_edge_scanner.cli import build_parser, main
 from sports_edge_scanner.core.events import read_events
 from sports_edge_scanner.core.execution import (
@@ -183,3 +187,47 @@ def test_live_run_command_rejects_without_enabled_configs(tmp_path):
     )
 
     assert exit_code == 1
+
+
+def test_live_run_command_rejects_when_live_mode_is_not_fully_enabled(
+    tmp_path,
+    monkeypatch,
+):
+    calls = []
+
+    class FailingMarketClient:
+        def __init__(self):
+            calls.append("market-client")
+            raise AssertionError("market data should not be fetched")
+
+    monkeypatch.setattr("sports_edge_scanner.cli.PolymarketClient", FailingMarketClient)
+    live_config_path = tmp_path / "live_config.json"
+    auth_config_path = tmp_path / "polymarket_auth_config.json"
+    write_live_config_template(live_config_path)
+    write_polymarket_auth_config_template(auth_config_path)
+    auth_config = PolymarketAuthConfig(
+        enabled=True,
+        allow_live_writes=True,
+    )
+    auth_config_path.write_text(
+        json.dumps(auth_config.to_dict(), sort_keys=True),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "live",
+            "run",
+            "--events",
+            str(tmp_path / "execution_events.jsonl"),
+            "--limit",
+            "1",
+            "--live-config",
+            str(live_config_path),
+            "--auth-config",
+            str(auth_config_path),
+        ]
+    )
+
+    assert exit_code == 1
+    assert calls == []

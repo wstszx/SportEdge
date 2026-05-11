@@ -1,8 +1,12 @@
 # Sports Edge Scanner
 
-Sports Edge Scanner is a research-only local app for scanning public prediction-market data, estimating break-even probabilities, flagging risk-aware candidates, and recording paper trades.
+Sports Edge Scanner is a local prediction-market research and execution app for scanning public data, estimating break-even probabilities, flagging risk-aware candidates, recording paper trades, and optionally routing approved live orders when explicit live configs are enabled.
 
-It does not place real bets, manage wallets, bypass platform restrictions, or claim that positive EV guarantees profit. Treat every signal as a hypothesis that needs validation through closing-line value, calibration, drawdown, and enough sample size.
+By default it does not place real bets or manage wallets. Live order submission
+is possible only after you explicitly enable both live safety and Polymarket
+auth configs. It does not bypass platform restrictions or claim that positive EV
+guarantees profit. Treat every signal as a hypothesis that needs validation
+through closing-line value, calibration, drawdown, and enough sample size.
 
 ## Usage
 
@@ -35,7 +39,7 @@ automation, but the normal operator workflow is the app mode switch.
 
 - Real execution is available only when live and Polymarket auth configs are
   explicitly enabled.
-- No private-key or wallet support.
+- No private keys or API secrets are accepted through the frontend or CLI.
 - Missing prices or low liquidity become warnings.
 - Kelly sizing returns zero when the edge is not positive.
 - The default Kelly output uses a 0.25 fraction and a 5% bankroll cap.
@@ -44,9 +48,10 @@ automation, but the normal operator workflow is the app mode switch.
 
 The dashboard reads the same JSONL files as the CLI. It shows overview metrics,
 latest markets, price history, paper trades, settlements, data-quality checks,
-shadow readiness, a Control tab for mode switching, and raw report JSON. In
-live mode, the app uses the same signal, risk, and order-generation pipeline as
-paper mode; only the final execution client changes.
+shadow readiness, a Control tab for mode switching, a `实盘执行` tab for live
+readiness and execution audit status, and raw report JSON. In live mode, the app
+uses the same signal, risk, and order-generation pipeline as paper mode; only
+the final execution client changes.
 
 ## Paper And Shadow Workflow
 
@@ -107,7 +112,10 @@ Real orders are submitted only when both local configs are explicitly enabled:
   present.
 
 Credential values are loaded from environment variables, not command-line
-arguments, and event logs store only sanitized execution status.
+arguments, and event logs store only sanitized execution status. The dashboard
+`实盘执行` tab summarizes whether live mode is ready, which safety/config
+blockers remain, how many orders were submitted or rejected, and the latest
+execution status.
 
 ## Polymarket Auth Readiness
 
