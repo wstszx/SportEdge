@@ -7,8 +7,10 @@ from dashboard_app import (
     RUN_MODE_PAPER_AND_LIVE,
     UI_TEXT,
     build_dashboard_live_state,
+    build_control_default_paths,
     build_live_run_args,
     _label,
+    _display_rows,
     _localize_json,
     _translate_value,
     build_shadow_watch_args,
@@ -251,6 +253,36 @@ def test_dashboard_translates_status_reasons_sides_and_json_keys():
     assert localized["交易"][0]["信号状态"] == "候选"
     assert localized["交易"][0]["信号原因"] == "公平概率超过优势阈值"
     assert _localize_json({"markets": []}) == {"市场列表": []}
+
+
+def test_dashboard_display_rows_keep_missing_numeric_values_arrow_safe():
+    rows = _display_rows(
+        [
+            {"yes_price": 0.47, "reasons": ["wide spread"]},
+            {"yes_price": None, "reasons": ["low liquidity", "wide spread"]},
+        ]
+    )
+
+    assert rows[0]["是价格"] == 0.47
+    assert rows[1]["是价格"] is None
+    assert rows[0]["原因"] == "买卖价差过大"
+    assert rows[1]["原因"] == "流动性不足, 买卖价差过大"
+
+
+def test_control_defaults_inherit_sidebar_live_config_paths():
+    defaults = build_control_default_paths(
+        snapshot_path=Path("custom_snapshots.jsonl"),
+        shadow_events_path=Path("custom_shadow.jsonl"),
+        execution_events_path=Path("custom_execution.jsonl"),
+        live_config_path=Path("configs/live.prod.json"),
+        auth_config_path=Path("configs/polymarket.prod.json"),
+    )
+
+    assert defaults["snapshot_path"] == "custom_snapshots.jsonl"
+    assert defaults["shadow_events_path"] == "custom_shadow.jsonl"
+    assert defaults["execution_events_path"] == "custom_execution.jsonl"
+    assert defaults["live_config_path"] == "configs/live.prod.json"
+    assert defaults["auth_config_path"] == "configs/polymarket.prod.json"
 
 
 def test_build_shadow_watch_args_maps_ui_values():

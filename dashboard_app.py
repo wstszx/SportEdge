@@ -319,6 +319,14 @@ def _translate_value(value):
     return value
 
 
+def _translate_table_value(value):
+    if isinstance(value, list):
+        return ", ".join(str(_translate_table_value(item)) for item in value)
+    if value is None:
+        return None
+    return _translate_value(value)
+
+
 def _localize_json(value):
     if isinstance(value, dict):
         return {
@@ -332,7 +340,10 @@ def _localize_json(value):
 
 def _display_rows(rows: list[dict]) -> list[dict]:
     return [
-        {TABLE_LABELS.get(key, key): _translate_value(value) for key, value in row.items()}
+        {
+            TABLE_LABELS.get(key, key): _translate_table_value(value)
+            for key, value in row.items()
+        }
         for row in rows
     ]
 
@@ -405,6 +416,26 @@ def build_live_run_args(
         json=True,
         live_command="run",
     )
+
+
+def build_control_default_paths(
+    *,
+    snapshot_path: Path,
+    shadow_events_path: Path,
+    execution_events_path: Path,
+    live_config_path: Path,
+    auth_config_path: Path,
+) -> dict[str, str]:
+    def display_path(path: Path) -> str:
+        return path.as_posix()
+
+    return {
+        "snapshot_path": display_path(snapshot_path),
+        "shadow_events_path": display_path(shadow_events_path),
+        "execution_events_path": display_path(execution_events_path),
+        "live_config_path": display_path(live_config_path),
+        "auth_config_path": display_path(auth_config_path),
+    }
 
 
 def run_dashboard_shadow_watch(
@@ -714,7 +745,16 @@ def _render_controls(
     snapshot_path: Path,
     shadow_events_path: Path,
     execution_events_path: Path,
+    live_config_path: Path,
+    auth_config_path: Path,
 ) -> None:
+    default_paths = build_control_default_paths(
+        snapshot_path=snapshot_path,
+        shadow_events_path=shadow_events_path,
+        execution_events_path=execution_events_path,
+        live_config_path=live_config_path,
+        auth_config_path=auth_config_path,
+    )
     st.subheader(_label("shadow_controls"))
     st.info(_label("automatic_data_fetch_help"))
     with st.form("run-mode-controls"):
@@ -730,17 +770,17 @@ def _render_controls(
         with st.expander(_label("advanced_settings"), expanded=False):
             snapshot_path_value = st.text_input(
                 _label("snapshot_path"),
-                str(snapshot_path),
+                default_paths["snapshot_path"],
                 key="control-snapshot-path",
             )
             events_path = st.text_input(
                 _label("shadow_events_path"),
-                str(shadow_events_path),
+                default_paths["shadow_events_path"],
                 key="control-shadow-events",
             )
             execution_events_path_value = st.text_input(
                 _label("execution_events_path"),
-                str(execution_events_path),
+                default_paths["execution_events_path"],
                 key="control-execution-events",
             )
             config_path = st.text_input(
@@ -750,12 +790,12 @@ def _render_controls(
             )
             live_config_path = st.text_input(
                 _label("live_config_path"),
-                "live_config.json",
+                default_paths["live_config_path"],
                 key="control-live-config",
             )
             auth_config_path = st.text_input(
                 _label("polymarket_auth_config_path"),
-                "polymarket_auth_config.json",
+                default_paths["auth_config_path"],
                 key="control-auth-config",
             )
             columns = st.columns(4)
@@ -982,7 +1022,14 @@ def main() -> None:
     with live_execution_tab:
         _render_live_execution(live_state)
     with control_tab:
-        _render_controls(state, snapshot_path, shadow_events_path, execution_events_path)
+        _render_controls(
+            state,
+            snapshot_path,
+            shadow_events_path,
+            execution_events_path,
+            live_config_path,
+            auth_config_path,
+        )
     with raw_tab:
         st.subheader(_label("report"))
         st.json(_localize_json(state["report"]))
