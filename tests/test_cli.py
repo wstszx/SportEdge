@@ -205,5 +205,4 @@ def test_app_live_flag_prints_safety_message(monkeypatch, capsys):
 
     assert _app(args) == 0
     output = capsys.readouterr().out
-    assert "Live mode UI only" in output
-    assert "real orders remain disabled" in output
+    assert "Live mode is controlled from the dashboard mode switch" in output

@@ -116,11 +116,30 @@ def test_parser_supports_live_commands():
             "confirm-live-dry-run",
         ]
     )
+    run_args = parser.parse_args(
+        [
+            "live",
+            "run",
+            "--limit",
+            "2",
+            "--events",
+            "execution.jsonl",
+            "--live-config",
+            "live.json",
+            "--auth-config",
+            "auth.json",
+        ]
+    )
 
     assert init_args.command == "live"
     assert init_args.live_command == "init-config"
     assert check_args.live_command == "check-config"
     assert dry_args.live_command == "dry-run"
+    assert run_args.live_command == "run"
+    assert run_args.limit == 2
+    assert run_args.events == "execution.jsonl"
+    assert run_args.live_config == "live.json"
+    assert run_args.auth_config == "auth.json"
 
 
 def test_live_init_and_check_config_commands(tmp_path):
@@ -147,3 +166,20 @@ def test_live_dry_run_command_writes_rejection_events(tmp_path):
     events = read_events(events_path)
     assert exit_code == 1
     assert "execution_rejected" in [event["event_type"] for event in events]
+
+
+def test_live_run_command_rejects_without_enabled_configs(tmp_path):
+    events_path = tmp_path / "execution_events.jsonl"
+
+    exit_code = main(
+        [
+            "live",
+            "run",
+            "--events",
+            str(events_path),
+            "--limit",
+            "1",
+        ]
+    )
+
+    assert exit_code == 1

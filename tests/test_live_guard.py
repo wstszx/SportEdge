@@ -65,13 +65,14 @@ def test_live_guard_rejects_when_kill_switch_enabled():
     assert "kill switch enabled" in decision.reasons
 
 
-def test_live_guard_rejects_live_mode_in_this_phase():
+def test_live_guard_approves_enabled_live_mode_when_safety_inputs_pass():
     decision = LiveModeGuard(
         dry_run_config(mode="live", live_enabled=True, kill_switch_enabled=False)
     ).evaluate(order(), allowed_risk(), confirmation_token="confirm-live-dry-run")
 
-    assert decision.allowed is False
-    assert "live mode is not implemented" in decision.reasons
+    assert decision.allowed is True
+    assert decision.approved_notional == 10.0
+    assert decision.reasons == ["allowed live execution"]
 
 
 def test_live_guard_rejects_missing_confirmation_token():

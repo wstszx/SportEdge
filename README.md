@@ -12,9 +12,16 @@ Start here:
 python -m sports_edge_scanner app
 ```
 
-Use the frontend Control tab to configure and run paper/shadow collection,
-quick scans, and readiness review. Lower-level CLI commands still exist for
-tests and automation, but the normal operator workflow is the app.
+Use the frontend Control tab to switch the running mode directly:
+
+- `仅纸面`
+- `仅实盘`
+- `纸面+实盘`
+
+After you press the start button, the app automatically collects the market data
+needed by the selected mode and then runs the matching workflow. In short, data
+fetching is 自动采集. Lower-level CLI commands still exist for tests and
+automation, but the normal operator workflow is the app mode switch.
 
 ## What The Scanner Reports
 
@@ -26,7 +33,8 @@ tests and automation, but the normal operator workflow is the app.
 
 ## Safety Defaults
 
-- No automated betting.
+- Real execution is available only when live and Polymarket auth configs are
+  explicitly enabled.
 - No private-key or wallet support.
 - Missing prices or low liquidity become warnings.
 - Kelly sizing returns zero when the edge is not positive.
@@ -36,16 +44,20 @@ tests and automation, but the normal operator workflow is the app.
 
 The dashboard reads the same JSONL files as the CLI. It shows overview metrics,
 latest markets, price history, paper trades, settlements, data-quality checks,
-shadow readiness, a Control tab for bounded shadow collection, and raw report
-JSON. It is still research-only and does not place orders.
+shadow readiness, a Control tab for mode switching, and raw report JSON. In
+live mode, the app uses the same signal, risk, and order-generation pipeline as
+paper mode; only the final execution client changes.
 
 ## Paper And Shadow Workflow
 
 Shadow mode rehearses live-trading decisions without sending real orders, signing payloads, storing private keys, or controlling funds.
 
-Use the frontend Control tab to run a quick scan or bounded shadow collection.
-Collection runs append events to `shadow_events.jsonl`, record failed iterations
-as `shadow_scan_error`, and update the readiness verdict shown in the app.
+Use the frontend Control tab to choose `仅纸面`, `仅实盘`, or `纸面+实盘`.
+The app handles automatic data collection, or 自动采集, before running the
+selected workflow.
+Paper collection runs append events to `shadow_events.jsonl`, record failed
+iterations as `shadow_scan_error`, and update the readiness verdict shown in the
+app.
 
 When `--fair` is omitted, shadow mode automatically builds conservative fair
 probability estimates from public orderbook and market data. Estimates include
@@ -75,19 +87,35 @@ is adequate for the next design review; it is not permission to trade live.
 Shadow results are not live fills and should be treated as research evidence
 only.
 
-## Live Safety Core
+## Live Execution
 
-The live safety layer is a scaffold for future real execution. In this phase it
-still does not place real orders, cancel orders, sign payloads, load private
-keys, or manage wallets. The app shows live safety status as read-only context;
-real venue execution requires a later authenticated execution design.
+Live execution uses the same market fetch, orderbook fetch, automatic fair
+probability, candidate generation, and risk checks as paper/shadow execution.
+The only intended behavioral difference is the final execution step:
+
+- paper mode writes simulated `shadow_order` and `shadow_fill` events;
+- live mode writes audited execution events and submits approved orders through
+  the authenticated Polymarket CLOB client.
+
+Real orders are submitted only when both local configs are explicitly enabled:
+
+- `live_config.json`: `mode` is `live`, `live_enabled` is `true`, and the kill
+  switch is disabled;
+- `polymarket_auth_config.json`: `enabled` and `allow_live_writes` are both
+  `true`;
+- credential environment variables named in `polymarket_auth_config.json` are
+  present.
+
+Credential values are loaded from environment variables, not command-line
+arguments, and event logs store only sanitized execution status.
 
 ## Polymarket Auth Readiness
 
-Authenticated Polymarket support is readiness-only. It does not place real
-orders and does not accept private keys or API secrets as command-line
-arguments. Credential values must come from environment variables named in
-local config files, and geographic restrictions must block authenticated writes.
+Authenticated Polymarket support can place real orders only through the live
+execution pipeline above. Private keys and API secrets are not accepted as
+command-line arguments. Credential values must come from environment variables
+named in local config files, and geographic restrictions must block
+authenticated writes.
 
 ## Advanced CLI
 

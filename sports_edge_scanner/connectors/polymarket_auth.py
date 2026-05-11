@@ -167,6 +167,52 @@ def map_execution_order_to_polymarket_args(order: ExecutionOrder) -> dict[str, A
     }
 
 
+def build_py_clob_client_v2(
+    credentials: PolymarketCredentials,
+    *,
+    host: str = "https://clob.polymarket.com",
+    chain_id: int = 137,
+):
+    from py_clob_client_v2.client import ClobClient
+    from py_clob_client_v2.clob_types import ApiCreds
+
+    return ClobClient(
+        host,
+        chain_id=chain_id,
+        key=credentials.private_key,
+        creds=ApiCreds(
+            api_key=credentials.api_key,
+            api_secret=credentials.api_secret,
+            api_passphrase=credentials.api_passphrase,
+        ),
+        signature_type=credentials.signature_type,
+        funder=credentials.funder,
+    )
+
+
+def _order_type_for(time_in_force: str):
+    from py_clob_client_v2.clob_types import OrderType
+
+    value = time_in_force.upper()
+    if value == "IOC":
+        return OrderType.FAK
+    if value in {"FOK", "FAK", "GTC", "GTD"}:
+        return getattr(OrderType, value)
+    return OrderType.GTC
+
+
+def _order_args_for(order: ExecutionOrder):
+    from py_clob_client_v2.clob_types import OrderArgs
+
+    args = map_execution_order_to_polymarket_args(order)
+    return OrderArgs(
+        token_id=args["token_id"],
+        price=args["price"],
+        size=args["size"],
+        side=args["side"],
+    )
+
+
 def _safe_error_message(status: str) -> str:
     return status
 
@@ -209,7 +255,10 @@ class PolymarketAuthenticatedExecutionClient:
             if geoblock.blocked:
                 return _rejected_result(order, "geoblocked")
             sdk = self._sdk()
-            response = sdk.post_order(**map_execution_order_to_polymarket_args(order))
+            response = sdk.create_and_post_order(
+                _order_args_for(order),
+                order_type=_order_type_for(order.time_in_force),
+            )
             if not isinstance(response, dict):
                 raise ValueError("SDK response must be an object")
             venue_order_id = str(response.get("orderID") or response.get("id") or "")

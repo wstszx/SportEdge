@@ -5,6 +5,7 @@ import pytest
 from sports_edge_scanner.connectors.polymarket_auth import (
     GeoblockStatus,
     PolymarketAuthenticatedExecutionClient,
+    build_py_clob_client_v2,
     PolymarketCredentials,
     PolymarketGeoblockClient,
     map_execution_order_to_polymarket_args,
@@ -108,8 +109,8 @@ class FakeSdkClient:
         self.orders = []
         self.cancels = []
 
-    def post_order(self, **kwargs):
-        self.orders.append(kwargs)
+    def create_and_post_order(self, order_args, order_type=None):
+        self.orders.append((order_args, order_type))
         return {"orderID": "venue-1", "status": "open"}
 
     def cancel(self, order_id):
@@ -164,12 +165,14 @@ def test_authenticated_client_normalizes_sdk_success():
     assert result.status == "open"
     assert result.venue_order_id == "venue-1"
     assert result.raw == {"sdk_status": "open"}
-    assert sdk.orders[0]["token_id"] == "token-a"
+    assert sdk.orders[0][0].token_id == "token-a"
+    assert sdk.orders[0][0].price == 0.5
+    assert sdk.orders[0][0].size == 20.0
 
 
 def test_authenticated_client_sanitizes_sdk_exception():
     class ExplodingSdk(FakeSdkClient):
-        def post_order(self, **kwargs):
+        def create_and_post_order(self, order_args, order_type=None):
             raise RuntimeError("secret private key leaked")
 
     client = PolymarketAuthenticatedExecutionClient(
@@ -200,3 +203,26 @@ def test_authenticated_client_cancel_and_get_order_normalize_responses():
 
     assert cancel.status == "canceled"
     assert status.status == "open"
+
+
+def test_build_py_clob_client_v2_uses_private_key_api_creds_and_config():
+    credentials = PolymarketCredentials(
+        private_key="0x" + "1" * 64,
+        api_key="key",
+        api_secret="secret",
+        api_passphrase="pass",
+        funder="0xfunder",
+        signature_type=1,
+    )
+
+    client = build_py_clob_client_v2(
+        credentials,
+        host="https://clob.polymarket.com",
+        chain_id=137,
+    )
+
+    assert client.host == "https://clob.polymarket.com"
+    assert client.chain_id == 137
+    assert client.creds.api_key == "key"
+    assert client.creds.api_secret == "secret"
+    assert client.creds.api_passphrase == "pass"

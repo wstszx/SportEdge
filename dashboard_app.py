@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 
-from sports_edge_scanner.cli import _shadow_watch
+from sports_edge_scanner.cli import _live_run, _shadow_watch, _snapshot_collect
 from sports_edge_scanner.core.ledger import (
     append_record,
     paper_settlement_record,
@@ -27,7 +27,10 @@ UI_TEXT = {
     "ledger_path": "交易记录文件",
     "snapshot_path": "市场快照文件",
     "shadow_events_path": "影子事件文件",
-    "sidebar_help": "请先在命令行采集快照，然后刷新这个仪表盘。",
+    "execution_events_path": "实盘审计事件文件",
+    "live_config_path": "实盘安全配置文件",
+    "polymarket_auth_config_path": "Polymarket 实盘配置文件",
+    "sidebar_help": "数据会在启动所选运行模式时自动采集；这些路径通常保持默认即可。",
     "realized_pnl": "已结算盈亏",
     "realized_roi": "已结算收益率",
     "win_rate": "胜率",
@@ -79,20 +82,27 @@ UI_TEXT = {
     "diagnostic_status": "诊断状态",
     "diagnostic_issues": "诊断问题",
     "diagnostic_next_actions": "下一步建议",
-    "shadow_controls": "纸面采集控制",
+    "shadow_controls": "运行模式控制",
+    "run_mode": "运行模式",
+    "run_mode_paper": "仅纸面",
+    "run_mode_live": "仅实盘",
+    "run_mode_paper_and_live": "纸面+实盘",
+    "start_selected_run_mode": "启动所选模式",
+    "automatic_data_fetch": "自动采集数据",
+    "automatic_data_fetch_help": "启动任一模式时，系统会先自动采集市场数据，再执行所选运行流程。",
+    "advanced_settings": "高级设置",
     "shadow_limit": "市场数量",
     "shadow_iterations": "采集次数",
     "shadow_interval_seconds": "间隔秒数",
     "auto_fair_min_confidence": "自动概率最低置信度",
     "shadow_config_path": "影子配置文件",
-    "run_shadow_collection": "运行纸面采集",
-    "run_quick_shadow_scan": "快速扫描一次",
-    "shadow_collection_started": "纸面采集已完成，请查看下方状态并刷新报告。",
-    "shadow_collection_failed": "纸面采集失败，请检查配置和事件日志。",
+    "mode_run_succeeded": "所选运行模式已完成，请查看状态和报告。",
+    "mode_run_failed": "所选运行模式未完成，请查看事件日志和安全状态。",
+    "snapshot_collection_failed": "自动数据采集失败，后续运行已停止。",
     "readiness": "准入状态",
     "readiness_blockers": "准入阻断原因",
     "live_safety_status": "实盘安全状态",
-    "live_safety_message": "实盘交易仍然禁用。当前页面只允许纸面采集和安全状态查看。",
+    "live_safety_message": "实盘模式会复用纸面交易的信号、风控和订单生成流程；只有执行端会在配置启用后提交真实订单。",
     "accepted_orders": "通过订单",
     "rejected_orders": "拒绝订单",
     "filled_notional": "已成交名义金额",
@@ -101,6 +111,17 @@ UI_TEXT = {
     "lack_snapshots": "笔模拟交易缺少快照",
     "missing_yes_no": "条快照缺少是/否价格",
     "short_history": "快照历史少于 24 小时",
+}
+
+
+RUN_MODE_PAPER = "paper"
+RUN_MODE_LIVE = "live"
+RUN_MODE_PAPER_AND_LIVE = "paper_and_live"
+
+RUN_MODE_LABEL_KEYS = {
+    RUN_MODE_PAPER: "run_mode_paper",
+    RUN_MODE_LIVE: "run_mode_live",
+    RUN_MODE_PAPER_AND_LIVE: "run_mode_paper_and_live",
 }
 
 
@@ -302,6 +323,42 @@ def build_shadow_watch_args(
     )
 
 
+def build_snapshot_collect_args(
+    *,
+    limit: int,
+    snapshot_path: str,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        limit=limit,
+        snapshots=snapshot_path,
+        fair=[],
+        snapshot_command="collect",
+    )
+
+
+def build_live_run_args(
+    *,
+    live_config_path: str,
+    auth_config_path: str,
+    events_path: str,
+    limit: int,
+    auto_fair_min_confidence: float,
+    confirm_token: str = "",
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        limit=limit,
+        fair="",
+        auto_fair_min_confidence=auto_fair_min_confidence,
+        config="",
+        live_config=live_config_path,
+        auth_config=auth_config_path,
+        events=events_path,
+        confirm_token=confirm_token,
+        json=True,
+        live_command="run",
+    )
+
+
 def run_dashboard_shadow_watch(
     *,
     limit: int,
@@ -322,6 +379,72 @@ def run_dashboard_shadow_watch(
             auto_fair_min_confidence=auto_fair_min_confidence,
         )
     )
+
+
+def run_dashboard_mode(
+    *,
+    mode: str,
+    snapshot_path: str,
+    shadow_events_path: str,
+    execution_events_path: str,
+    shadow_config_path: str = "shadow_config.json",
+    live_config_path: str = "",
+    limit: int = 20,
+    iterations: int = 3,
+    interval_seconds: float = 0.0,
+    auto_fair_min_confidence: float = 0.75,
+    snapshot_runner=_snapshot_collect,
+    shadow_runner=_shadow_watch,
+    live_runner=_live_run,
+    auth_config_path: str = "polymarket_auth_config.json",
+) -> dict[str, int | bool | str | None]:
+    if mode not in RUN_MODE_LABEL_KEYS:
+        raise ValueError(f"unknown run mode: {mode}")
+
+    snapshot_exit_code = snapshot_runner(
+        build_snapshot_collect_args(
+            limit=limit,
+            snapshot_path=snapshot_path,
+        )
+    )
+    result: dict[str, int | bool | str | None] = {
+        "mode": mode,
+        "success": snapshot_exit_code == 0,
+        "snapshot_exit_code": snapshot_exit_code,
+        "paper_exit_code": None,
+        "live_exit_code": None,
+    }
+    if snapshot_exit_code != 0:
+        return result
+
+    if mode in {RUN_MODE_PAPER, RUN_MODE_PAPER_AND_LIVE}:
+        paper_exit_code = shadow_runner(
+            build_shadow_watch_args(
+                limit=limit,
+                iterations=iterations,
+                interval_seconds=interval_seconds,
+                config_path=shadow_config_path,
+                events_path=shadow_events_path,
+                auto_fair_min_confidence=auto_fair_min_confidence,
+            )
+        )
+        result["paper_exit_code"] = paper_exit_code
+        result["success"] = result["success"] and paper_exit_code == 0
+
+    if mode in {RUN_MODE_LIVE, RUN_MODE_PAPER_AND_LIVE}:
+        live_exit_code = live_runner(
+            build_live_run_args(
+                live_config_path=live_config_path,
+                auth_config_path=auth_config_path,
+                events_path=execution_events_path,
+                limit=limit,
+                auto_fair_min_confidence=auto_fair_min_confidence,
+            )
+        )
+        result["live_exit_code"] = live_exit_code
+        result["success"] = result["success"] and live_exit_code == 0
+
+    return result
 
 
 def _load_state(
@@ -495,66 +618,104 @@ def _render_strategy_diagnostics(report: dict) -> None:
 
 def _render_controls(
     state: dict,
+    snapshot_path: Path,
     shadow_events_path: Path,
+    execution_events_path: Path,
 ) -> None:
     st.subheader(_label("shadow_controls"))
-    with st.form("shadow-controls"):
-        events_path = st.text_input(
-            _label("shadow_events_path"),
-            str(shadow_events_path),
-            key="control-shadow-events",
+    st.info(_label("automatic_data_fetch_help"))
+    with st.form("run-mode-controls"):
+        mode_options = list(RUN_MODE_LABEL_KEYS)
+        mode_labels = [_label(RUN_MODE_LABEL_KEYS[mode]) for mode in mode_options]
+        selected_mode_label = st.radio(
+            _label("run_mode"),
+            mode_labels,
+            horizontal=True,
         )
-        config_path = st.text_input(
-            _label("shadow_config_path"),
-            "shadow_config.json",
-            key="control-shadow-config",
-        )
-        columns = st.columns(4)
-        limit = columns[0].number_input(
-            _label("shadow_limit"),
-            min_value=1,
-            max_value=100,
-            value=20,
-            step=1,
-        )
-        iterations = columns[1].number_input(
-            _label("shadow_iterations"),
-            min_value=1,
-            max_value=20,
-            value=3,
-            step=1,
-        )
-        interval_seconds = columns[2].number_input(
-            _label("shadow_interval_seconds"),
-            min_value=0.0,
-            value=0.0,
-            step=1.0,
-        )
-        min_confidence = columns[3].number_input(
-            _label("auto_fair_min_confidence"),
-            min_value=0.0,
-            max_value=1.0,
-            value=0.75,
-            step=0.05,
-        )
-        run_collection = st.form_submit_button(_label("run_shadow_collection"))
-        run_quick = st.form_submit_button(_label("run_quick_shadow_scan"))
+        selected_mode = mode_options[mode_labels.index(selected_mode_label)]
 
-    if run_collection or run_quick:
-        selected_iterations = 1 if run_quick else int(iterations)
-        exit_code = run_dashboard_shadow_watch(
+        with st.expander(_label("advanced_settings"), expanded=False):
+            snapshot_path_value = st.text_input(
+                _label("snapshot_path"),
+                str(snapshot_path),
+                key="control-snapshot-path",
+            )
+            events_path = st.text_input(
+                _label("shadow_events_path"),
+                str(shadow_events_path),
+                key="control-shadow-events",
+            )
+            execution_events_path_value = st.text_input(
+                _label("execution_events_path"),
+                str(execution_events_path),
+                key="control-execution-events",
+            )
+            config_path = st.text_input(
+                _label("shadow_config_path"),
+                "shadow_config.json",
+                key="control-shadow-config",
+            )
+            live_config_path = st.text_input(
+                _label("live_config_path"),
+                "live_config.json",
+                key="control-live-config",
+            )
+            auth_config_path = st.text_input(
+                _label("polymarket_auth_config_path"),
+                "polymarket_auth_config.json",
+                key="control-auth-config",
+            )
+            columns = st.columns(4)
+            limit = columns[0].number_input(
+                _label("shadow_limit"),
+                min_value=1,
+                max_value=100,
+                value=20,
+                step=1,
+            )
+            iterations = columns[1].number_input(
+                _label("shadow_iterations"),
+                min_value=1,
+                max_value=20,
+                value=3,
+                step=1,
+            )
+            interval_seconds = columns[2].number_input(
+                _label("shadow_interval_seconds"),
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+            )
+            min_confidence = columns[3].number_input(
+                _label("auto_fair_min_confidence"),
+                min_value=0.0,
+                max_value=1.0,
+                value=0.75,
+                step=0.05,
+            )
+        run_mode = st.form_submit_button(_label("start_selected_run_mode"))
+
+    if run_mode:
+        result = run_dashboard_mode(
+            mode=selected_mode,
+            snapshot_path=snapshot_path_value,
+            shadow_events_path=events_path,
+            execution_events_path=execution_events_path_value,
+            shadow_config_path=config_path,
+            live_config_path=live_config_path,
+            auth_config_path=auth_config_path,
             limit=int(limit),
-            iterations=selected_iterations,
+            iterations=int(iterations),
             interval_seconds=float(interval_seconds),
-            config_path=config_path,
-            events_path=events_path,
             auto_fair_min_confidence=float(min_confidence),
         )
-        if exit_code == 0:
-            st.success(_label("shadow_collection_started"))
+        if result["success"]:
+            st.success(_label("mode_run_succeeded"))
             st.rerun()
+        elif result["snapshot_exit_code"] != 0:
+            st.error(_label("snapshot_collection_failed"))
         else:
-            st.error(_label("shadow_collection_failed"))
+            st.error(_label("mode_run_failed"))
 
     _render_readiness(state["shadow_report"].get("readiness", {}))
     _render_strategy_diagnostics(state["shadow_report"])
@@ -634,10 +795,18 @@ def main() -> None:
 
     with st.sidebar:
         st.header(_label("data"))
-        ledger_path = Path(st.text_input(_label("ledger_path"), "paper_trades.jsonl"))
-        snapshot_path = Path(st.text_input(_label("snapshot_path"), "market_snapshots.jsonl"))
-        shadow_events_path = Path(st.text_input(_label("shadow_events_path"), "shadow_events.jsonl"))
         st.caption(_label("sidebar_help"))
+        with st.sidebar.expander(_label("advanced_settings"), expanded=False):
+            ledger_path = Path(st.text_input(_label("ledger_path"), "paper_trades.jsonl"))
+            snapshot_path = Path(
+                st.text_input(_label("snapshot_path"), "market_snapshots.jsonl")
+            )
+            shadow_events_path = Path(
+                st.text_input(_label("shadow_events_path"), "shadow_events.jsonl")
+            )
+            execution_events_path = Path(
+                st.text_input(_label("execution_events_path"), "execution_events.jsonl")
+            )
 
     records, snapshots, _shadow_events, state = _load_state(
         ledger_path,
@@ -676,7 +845,7 @@ def main() -> None:
     with shadow_tab:
         _render_shadow(state)
     with control_tab:
-        _render_controls(state, shadow_events_path)
+        _render_controls(state, snapshot_path, shadow_events_path, execution_events_path)
     with raw_tab:
         st.subheader(_label("report"))
         st.json(_localize_json(state["report"]))

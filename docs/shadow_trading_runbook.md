@@ -8,23 +8,24 @@ Sports Edge Scanner shadow mode is a research workflow. It does not place real o
 python -m sports_edge_scanner app
 ```
 
-Use the Control tab to configure and run paper/shadow collection. The app is
-the normal operator workflow.
+Use the Control tab to switch the running mode directly: `仅纸面`, `仅实盘`,
+or `纸面+实盘`. The app is the normal operator workflow.
 
-## 2. Run Paper/Shadow Collection
+## 2. Choose A Running Mode
 
-In the Control tab, set:
+In the Control tab, choose one mode and press the start button:
 
-- shadow events path;
-- shadow config path;
-- market limit;
-- collection iterations;
-- interval seconds;
-- automatic fair-probability confidence threshold.
+- `仅纸面`: automatically collect market data, then run the paper/shadow workflow.
+- `仅实盘`: automatically collect market data, then run the same signal and
+  risk flow with real execution enabled by config.
+- `纸面+实盘`: automatically collect market data, then run both workflows.
 
-Then choose a quick one-iteration scan or bounded paper collection. Each
-iteration receives a separate run id and appends to the same event log. If an
-iteration fails, the app records a `shadow_scan_error` event.
+Data fetching is automatic for all three modes. File paths, limits, iterations,
+and thresholds remain available under Advanced Settings for tests or unusual
+local setups, but they are not part of the normal operator workflow.
+
+Each paper/shadow iteration receives a separate run id and appends to the same
+event log. If an iteration fails, the app records a `shadow_scan_error` event.
 
 ## 3. Review Readiness
 
@@ -43,8 +44,8 @@ The Shadow and Control tabs show the readiness verdict:
 - `READY`: paper evidence meets the configured gate for the next design review.
 - `NOT READY`: blockers explain what evidence is missing or unreliable.
 
-`READY` is not live-trading permission. It only means the shadow evidence is
-clean enough to consider the next safety design step.
+`READY` is not enough by itself to place live orders. Live execution also
+requires explicitly enabled live and Polymarket auth configs.
 
 ## 4. Optional Manual Fair Override
 

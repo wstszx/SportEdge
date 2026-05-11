@@ -9,8 +9,10 @@ from uuid import uuid4
 
 from sports_edge_scanner.connectors.polymarket import PolymarketClient
 from sports_edge_scanner.connectors.polymarket_auth import (
+    PolymarketAuthenticatedExecutionClient,
     EnvironmentPolymarketCredentialProvider,
     PolymarketGeoblockClient,
+    build_py_clob_client_v2,
     load_polymarket_auth_config,
     write_polymarket_auth_config_template,
 )
@@ -24,6 +26,7 @@ from sports_edge_scanner.core.execution import (
     LiveModeGuard,
     load_live_mode_config,
     run_dry_run_execution,
+    run_live_scan,
     write_live_config_template,
 )
 from sports_edge_scanner.core.auto_fair import AutoFairConfig
@@ -370,7 +373,7 @@ def _quality(args: argparse.Namespace) -> int:
 
 def _app(args: argparse.Namespace) -> int:
     if args.live:
-        print("Live mode UI only: real orders remain disabled.")
+        print("Live mode is controlled from the dashboard mode switch.")
 
     if args.shadow_watch:
         watch_args = argparse.Namespace(
@@ -683,6 +686,58 @@ def _live_dry_run(args: argparse.Namespace) -> int:
     return 0 if result.status == "dry_run_accepted" else 1
 
 
+def _live_run(args: argparse.Namespace) -> int:
+    try:
+        live_config = _load_live_config(args.live_config)
+        auth_config = load_polymarket_auth_config(Path(args.auth_config))
+        if not auth_config.enabled or not auth_config.allow_live_writes:
+            print("live run failed: Polymarket live writes are not enabled.", file=sys.stderr)
+            return 1
+        execution_client = PolymarketAuthenticatedExecutionClient(
+            credential_provider=EnvironmentPolymarketCredentialProvider(auth_config),
+            sdk_client_factory=lambda credentials: build_py_clob_client_v2(
+                credentials,
+                host=auth_config.host,
+                chain_id=auth_config.chain_id,
+            ),
+            geoblock_client=PolymarketGeoblockClient(),
+            allow_live_writes=auth_config.allow_live_writes,
+        )
+        fair_book = (
+            load_fair_probability_book(Path(args.fair))
+            if args.fair
+            else None
+        )
+        result = run_live_scan(
+            market_client=PolymarketClient(),
+            book_client=PolymarketCLOBClient(),
+            fair_book=fair_book,
+            risk_config=_load_risk_config(args.config),
+            live_config=live_config,
+            execution_client=execution_client,
+            limit=args.limit,
+            events_path=Path(args.events),
+            run_id=str(uuid4()),
+            auto_fair_config=AutoFairConfig(
+                min_confidence=args.auto_fair_min_confidence,
+            ),
+            confirmation_token=args.confirm_token,
+        )
+    except Exception as exc:
+        print(f"live run failed: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(f"Markets: {result['markets']}")
+        print(f"Candidates: {result['candidate_count']}")
+        print(f"Submitted live orders: {result['execution_submitted_count']}")
+        print(f"Rejected live orders: {result['execution_rejected_count']}")
+        print(f"Events: {result['events_path']}")
+    return 0 if result["execution_submitted_count"] else 1
+
+
 def _polymarket_auth_init_config(args: argparse.Namespace) -> int:
     try:
         path = write_polymarket_auth_config_template(Path(args.config), force=args.force)
@@ -911,6 +966,21 @@ def build_parser() -> argparse.ArgumentParser:
     live_dry_run.add_argument("--confirm-token", default="")
     live_dry_run.add_argument("--json", action="store_true")
     live_dry_run.set_defaults(func=_live_dry_run)
+
+    live_run = live_subparsers.add_parser(
+        "run",
+        help="Run real live execution through the same signal and risk flow as paper mode.",
+    )
+    live_run.add_argument("--limit", type=int, default=20)
+    live_run.add_argument("--fair", default="", help="Fair probability JSON file.")
+    live_run.add_argument("--auto-fair-min-confidence", type=float, default=0.75)
+    live_run.add_argument("--config", default="", help="Risk config JSON file.")
+    live_run.add_argument("--live-config", default="live_config.json")
+    live_run.add_argument("--auth-config", default="polymarket_auth_config.json")
+    live_run.add_argument("--events", default="execution_events.jsonl")
+    live_run.add_argument("--confirm-token", default="")
+    live_run.add_argument("--json", action="store_true")
+    live_run.set_defaults(func=_live_run)
 
     polymarket_auth = subparsers.add_parser(
         "polymarket-auth",

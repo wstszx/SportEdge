@@ -2,11 +2,17 @@ import pytest
 from pathlib import Path
 
 from dashboard_app import (
+    RUN_MODE_LIVE,
+    RUN_MODE_PAPER,
+    RUN_MODE_PAPER_AND_LIVE,
     UI_TEXT,
+    build_live_run_args,
     _label,
     _localize_json,
     _translate_value,
     build_shadow_watch_args,
+    build_snapshot_collect_args,
+    run_dashboard_mode,
     run_dashboard_shadow_watch,
 )
 from sports_edge_scanner.dashboard_data import (
@@ -150,7 +156,7 @@ def test_build_dashboard_state_includes_shadow_report_and_tables():
 
 def test_dashboard_ui_text_is_localized_to_chinese():
     assert UI_TEXT["app_title"] == "体育下注研究仪表盘"
-    assert UI_TEXT["sidebar_help"] == "请先在命令行采集快照，然后刷新这个仪表盘。"
+    assert UI_TEXT["sidebar_help"] == "数据会在启动所选运行模式时自动采集；这些路径通常保持默认即可。"
     assert _label("realized_pnl") == "已结算盈亏"
     assert _label("realized_roi") == "已结算收益率"
     assert _label("average_clv") == "平均收盘价优势"
@@ -167,9 +173,28 @@ def test_dashboard_has_shadow_ui_labels():
 
 def test_dashboard_has_control_ui_labels():
     assert _label("control_tab") == "控制台"
-    assert _label("run_shadow_collection") == "运行纸面采集"
-    assert _label("run_quick_shadow_scan") == "快速扫描一次"
+    assert _label("shadow_controls") == "运行模式控制"
+    assert _label("start_selected_run_mode") == "启动所选模式"
     assert _label("live_safety_status") == "实盘安全状态"
+    assert "复用纸面交易" in _label("live_safety_message")
+
+
+def test_dashboard_has_operator_run_mode_labels():
+    assert _label("run_mode") == "运行模式"
+    assert _label("run_mode_paper") == "仅纸面"
+    assert _label("run_mode_live") == "仅实盘"
+    assert _label("run_mode_paper_and_live") == "纸面+实盘"
+    assert _label("start_selected_run_mode") == "启动所选模式"
+    assert _label("automatic_data_fetch") == "自动采集数据"
+    assert _label("advanced_settings") == "高级设置"
+    assert _label("polymarket_auth_config_path") == "Polymarket 实盘配置文件"
+
+
+def test_dashboard_keeps_data_and_collection_settings_advanced():
+    source = Path("dashboard_app.py").read_text(encoding="utf-8")
+
+    assert 'st.expander(_label("advanced_settings"), expanded=False)' in source
+    assert 'st.sidebar.expander(_label("advanced_settings"), expanded=False)' in source
 
 
 def test_dashboard_has_strategy_diagnostics_labels():
@@ -237,6 +262,35 @@ def test_build_shadow_watch_args_maps_ui_values():
     assert args.json is True
 
 
+def test_build_snapshot_collect_args_maps_automatic_data_values():
+    args = build_snapshot_collect_args(
+        limit=12,
+        snapshot_path="market_snapshots.jsonl",
+    )
+
+    assert args.limit == 12
+    assert args.snapshots == "market_snapshots.jsonl"
+    assert args.fair == []
+
+
+def test_build_live_run_args_maps_ui_values():
+    args = build_live_run_args(
+        live_config_path="live_config.json",
+        auth_config_path="polymarket_auth_config.json",
+        events_path="execution_events.jsonl",
+        limit=5,
+        auto_fair_min_confidence=0.8,
+    )
+
+    assert args.live_command == "run"
+    assert args.live_config == "live_config.json"
+    assert args.auth_config == "polymarket_auth_config.json"
+    assert args.events == "execution_events.jsonl"
+    assert args.limit == 5
+    assert args.auto_fair_min_confidence == 0.8
+    assert args.json is True
+
+
 def test_run_dashboard_shadow_watch_uses_injected_runner():
     calls = []
 
@@ -256,3 +310,136 @@ def test_run_dashboard_shadow_watch_uses_injected_runner():
 
     assert exit_code == 0
     assert calls[0].limit == 2
+
+
+def test_run_dashboard_mode_paper_fetches_data_then_runs_paper_only():
+    calls = []
+
+    def snapshot_runner(args):
+        calls.append(("snapshot", args.snapshots))
+        return 0
+
+    def shadow_runner(args):
+        calls.append(("paper", args.events))
+        return 0
+
+    def live_runner(args):
+        calls.append(("live", args.events))
+        return 0
+
+    result = run_dashboard_mode(
+        mode=RUN_MODE_PAPER,
+        snapshot_path="market_snapshots.jsonl",
+        shadow_events_path="shadow_events.jsonl",
+        execution_events_path="execution_events.jsonl",
+        snapshot_runner=snapshot_runner,
+        shadow_runner=shadow_runner,
+        live_runner=live_runner,
+    )
+
+    assert result["success"] is True
+    assert calls == [
+        ("snapshot", "market_snapshots.jsonl"),
+        ("paper", "shadow_events.jsonl"),
+    ]
+    assert result["paper_exit_code"] == 0
+    assert result["live_exit_code"] is None
+
+
+def test_run_dashboard_mode_live_fetches_data_then_runs_live_only():
+    calls = []
+
+    def snapshot_runner(args):
+        calls.append(("snapshot", args.snapshots))
+        return 0
+
+    def shadow_runner(args):
+        calls.append(("paper", args.events))
+        return 0
+
+    def live_runner(args):
+        calls.append(("live", args.events))
+        return 0
+
+    result = run_dashboard_mode(
+        mode=RUN_MODE_LIVE,
+        snapshot_path="market_snapshots.jsonl",
+        shadow_events_path="shadow_events.jsonl",
+        execution_events_path="execution_events.jsonl",
+        snapshot_runner=snapshot_runner,
+        shadow_runner=shadow_runner,
+        live_runner=live_runner,
+    )
+
+    assert result["success"] is True
+    assert calls == [
+        ("snapshot", "market_snapshots.jsonl"),
+        ("live", "execution_events.jsonl"),
+    ]
+    assert result["paper_exit_code"] is None
+    assert result["live_exit_code"] == 0
+
+
+def test_run_dashboard_mode_combined_fetches_data_then_runs_paper_and_live():
+    calls = []
+
+    def snapshot_runner(args):
+        calls.append(("snapshot", args.snapshots))
+        return 0
+
+    def shadow_runner(args):
+        calls.append(("paper", args.events))
+        return 0
+
+    def live_runner(args):
+        calls.append(("live", args.events))
+        return 0
+
+    result = run_dashboard_mode(
+        mode=RUN_MODE_PAPER_AND_LIVE,
+        snapshot_path="market_snapshots.jsonl",
+        shadow_events_path="shadow_events.jsonl",
+        execution_events_path="execution_events.jsonl",
+        snapshot_runner=snapshot_runner,
+        shadow_runner=shadow_runner,
+        live_runner=live_runner,
+    )
+
+    assert result["success"] is True
+    assert calls == [
+        ("snapshot", "market_snapshots.jsonl"),
+        ("paper", "shadow_events.jsonl"),
+        ("live", "execution_events.jsonl"),
+    ]
+
+
+def test_run_dashboard_mode_stops_when_automatic_data_fetch_fails():
+    calls = []
+
+    def snapshot_runner(args):
+        calls.append(("snapshot", args.snapshots))
+        return 1
+
+    def shadow_runner(args):
+        calls.append(("paper", args.events))
+        return 0
+
+    def live_runner(args):
+        calls.append(("live", args.events))
+        return 0
+
+    result = run_dashboard_mode(
+        mode=RUN_MODE_PAPER_AND_LIVE,
+        snapshot_path="market_snapshots.jsonl",
+        shadow_events_path="shadow_events.jsonl",
+        execution_events_path="execution_events.jsonl",
+        snapshot_runner=snapshot_runner,
+        shadow_runner=shadow_runner,
+        live_runner=live_runner,
+    )
+
+    assert result["success"] is False
+    assert calls == [("snapshot", "market_snapshots.jsonl")]
+    assert result["snapshot_exit_code"] == 1
+    assert result["paper_exit_code"] is None
+    assert result["live_exit_code"] is None

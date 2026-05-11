@@ -1,9 +1,14 @@
 import json
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from sports_edge_scanner.core.auto_fair import AutoFairConfig
 from sports_edge_scanner.core.events import append_event, make_event
+from sports_edge_scanner.core.fair import FairProbabilityBook
+from sports_edge_scanner.core.risk import RiskConfig
+from sports_edge_scanner.core.trade_pipeline import run_trade_scan
 
 
 @dataclass(frozen=True)
@@ -161,8 +166,6 @@ class LiveModeGuard:
             reasons.append("unknown live mode")
         if self.config.mode == "live" and not self.config.live_enabled:
             reasons.append("live mode disabled")
-        if self.config.mode == "live":
-            reasons.append("live mode is not implemented")
         if (
             self.config.require_confirmation_token
             and confirmation_token != self.config.confirmation_token
@@ -177,9 +180,12 @@ class LiveModeGuard:
         if approved_notional <= 0.0:
             reasons.append("no approved notional")
 
-        allowed = not reasons and self.config.mode == "dry_run"
+        allowed = not reasons and self.config.mode in {"dry_run", "live"}
         if allowed:
-            reasons.append("allowed dry-run execution")
+            if self.config.mode == "live":
+                reasons.append("allowed live execution")
+            else:
+                reasons.append("allowed dry-run execution")
 
         return GuardDecision(
             allowed=allowed,
@@ -219,7 +225,7 @@ def _rejected_result(order: ExecutionOrder, decision: GuardDecision) -> Executio
     )
 
 
-def run_dry_run_execution(
+def run_execution(
     execution_client: ExecutionClient,
     guard: LiveModeGuard,
     order: ExecutionOrder,
@@ -227,6 +233,7 @@ def run_dry_run_execution(
     events_path: Path,
     run_id: str,
     confirmation_token: str = "",
+    accepted_event_type: str = "execution_result",
 ) -> ExecutionResult:
     append_event(events_path, make_event("execution_intent", run_id, order.to_dict()))
     decision = guard.evaluate(order, risk_decision, confirmation_token=confirmation_token)
@@ -244,6 +251,101 @@ def run_dry_run_execution(
         return result
 
     result = execution_client.place_order(order)
-    append_event(events_path, make_event("execution_dry_run", run_id, result.to_dict()))
+    append_event(events_path, make_event(accepted_event_type, run_id, result.to_dict()))
     append_event(events_path, make_event("execution_result", run_id, result.to_dict()))
     return result
+
+
+def run_dry_run_execution(
+    execution_client: ExecutionClient,
+    guard: LiveModeGuard,
+    order: ExecutionOrder,
+    risk_decision,
+    events_path: Path,
+    run_id: str,
+    confirmation_token: str = "",
+) -> ExecutionResult:
+    return run_execution(
+        execution_client=execution_client,
+        guard=guard,
+        order=order,
+        risk_decision=risk_decision,
+        events_path=events_path,
+        run_id=run_id,
+        confirmation_token=confirmation_token,
+        accepted_event_type="execution_dry_run",
+    )
+
+
+def _execution_order_id(run_id: str, index: int) -> str:
+    return f"{run_id}-live-{index}"
+
+
+def run_live_scan(
+    market_client: Any,
+    book_client: Any,
+    fair_book: FairProbabilityBook | None,
+    risk_config: RiskConfig,
+    live_config: LiveModeConfig,
+    execution_client: ExecutionClient,
+    limit: int,
+    events_path: Path,
+    run_id: str,
+    now: datetime | None = None,
+    auto_fair_config: AutoFairConfig | None = None,
+    confirmation_token: str = "",
+) -> dict[str, object]:
+    guard = LiveModeGuard(live_config)
+
+    def on_accepted_order(candidate, decision, book, order_index, current_time):
+        order = ExecutionOrder(
+            client_order_id=_execution_order_id(run_id, order_index),
+            market_id=candidate.market_id,
+            market_slug=candidate.market_slug,
+            outcome_name=candidate.outcome_name,
+            token_id=candidate.token_id,
+            side="BUY",
+            order_type="LIMIT",
+            limit_price=candidate.limit_price,
+            notional=decision.approved_notional,
+            time_in_force="IOC",
+            source_signal_id=f"{run_id}-signal-{order_index}",
+            created_at=current_time.isoformat(),
+            venue="polymarket",
+        )
+        result = run_execution(
+            execution_client=execution_client,
+            guard=guard,
+            order=order,
+            risk_decision=decision,
+            events_path=events_path,
+            run_id=run_id,
+            confirmation_token=confirmation_token,
+            accepted_event_type="execution_order",
+        )
+        if result.status == "rejected":
+            return {
+                "accepted": False,
+                "counts": {"execution_rejected_count": 1},
+            }
+        return {
+            "accepted": True,
+            "counts": {"execution_submitted_count": 1},
+        }
+
+    summary = run_trade_scan(
+        market_client=market_client,
+        book_client=book_client,
+        fair_book=fair_book,
+        risk_config=risk_config,
+        limit=limit,
+        events_path=events_path,
+        run_id=run_id,
+        order_id_suffix="live",
+        on_accepted_order=on_accepted_order,
+        now=now,
+        auto_fair_config=auto_fair_config,
+    )
+    summary.setdefault("execution_submitted_count", 0)
+    summary.setdefault("execution_rejected_count", 0)
+    return summary
