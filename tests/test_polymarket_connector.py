@@ -84,7 +84,17 @@ def test_is_sports_market_uses_category_tags_and_title_keywords():
     assert is_sports_market({"category": "Sports", "question": "Unrelated"}) is True
     assert is_sports_market({"tags": [{"label": "NBA"}], "question": "Market"}) is True
     assert is_sports_market({"question": "Will Arsenal win?"}) is True
+    assert is_sports_market({"question": "Will the NFL expand in 2027?"}) is True
     assert is_sports_market({"question": "Will it rain tomorrow?"}) is False
+    assert (
+        is_sports_market(
+            {
+                "question": "Will Netflix, Inc. (NFLX) hit (LOW) $85 in May?",
+                "slug": "will-netflix-inc-nflx-hit-low-85-in-may",
+            }
+        )
+        is False
+    )
 
 
 def test_fetch_markets_retries_after_transient_failure(monkeypatch):

@@ -70,6 +70,7 @@ UI_TEXT = {
     "time_span": "覆盖时长",
     "candidates": "候选快照",
     "missing_prices": "缺失价格",
+    "recent_missing_prices": "最近缺价",
     "unmatched_trades": "未匹配交易",
     "report": "报告",
     "quality": "质量",
@@ -98,7 +99,7 @@ UI_TEXT = {
     "shadow_iterations": "采集次数",
     "shadow_interval_seconds": "间隔秒数",
     "auto_fair_min_confidence": "自动概率最低置信度",
-    "shadow_config_path": "影子配置文件",
+    "shadow_config_path": "影子配置文件（可选）",
     "mode_run_succeeded": "所选运行模式已完成，请查看状态和报告。",
     "mode_run_failed": "所选运行模式未完成，请查看事件日志和安全状态。",
     "snapshot_collection_failed": "自动数据采集失败，后续运行已停止。",
@@ -121,7 +122,9 @@ UI_TEXT = {
     "unfilled_notional": "未成交名义金额",
     "average_slippage": "平均滑点",
     "lack_snapshots": "笔模拟交易缺少快照",
-    "missing_yes_no": "条快照缺少是/否价格",
+    "missing_yes_no": "条历史快照缺少市场价格",
+    "latest_missing_prices": "个市场当前缺少价格",
+    "recent_missing_snapshot_prices": "条最近快照缺少市场价格",
     "short_history": "快照历史少于 24 小时",
 }
 
@@ -142,8 +145,10 @@ TABLE_LABELS = {
     "title": "标题",
     "slug": "市场短标识",
     "timestamp": "时间",
-    "yes_price": "是价格",
-    "no_price": "否价格",
+    "yes_outcome_name": "主结果",
+    "no_outcome_name": "对手结果",
+    "yes_price": "主结果价格",
+    "no_price": "对手结果价格",
     "liquidity": "流动性",
     "volume": "成交量",
     "signal_status": "信号状态",
@@ -158,6 +163,11 @@ TABLE_LABELS = {
     "time_span_hours": "覆盖小时",
     "candidate_snapshot_count": "候选快照",
     "missing_price_snapshot_count": "缺失价格快照",
+    "recent_snapshot_count": "最近快照",
+    "recent_missing_price_snapshot_count": "最近缺价快照",
+    "recent_missing_price_market_count": "最近缺价市场",
+    "latest_missing_price_market_count": "当前缺价市场",
+    "latest_missing_price": "当前是否缺价",
     "paper_trades": "模拟交易数",
     "settlements": "结算记录数",
     "settled_trades": "已结算交易数",
@@ -247,7 +257,8 @@ VALUE_LABELS = {
     "no": "否",
     "fair probability clears edge threshold": "公平概率超过优势阈值",
     "no fair probability supplied": "未提供公平概率",
-    "missing YES or NO price": "缺少 YES/NO 价格",
+    "missing YES or NO price": "缺少市场价格",
+    "missing market prices": "缺少市场价格",
     "low liquidity": "流动性不足",
     "wide spread": "买卖价差过大",
     "market is closed": "市场已关闭",
@@ -576,7 +587,12 @@ def _render_overview(state: dict) -> None:
         warning_parts.append(
             f"{quality['paper_trades_missing_snapshots']} {_label('lack_snapshots')}"
         )
-    if quality["missing_price_snapshot_count"]:
+    if quality.get("recent_missing_price_snapshot_count"):
+        warning_parts.append(
+            f"{quality['recent_missing_price_snapshot_count']} "
+            f"{_label('recent_missing_snapshot_prices')}"
+        )
+    elif quality["missing_price_snapshot_count"]:
         warning_parts.append(
             f"{quality['missing_price_snapshot_count']} {_label('missing_yes_no')}"
         )
@@ -607,15 +623,15 @@ def _render_markets(state: dict, snapshots: list[dict]) -> None:
     chart_history = [
         {
             "时间": row["timestamp"],
-            "是价格": row["yes_price"] if row["yes_price"] is not None else 0.0,
-            "否价格": row["no_price"] if row["no_price"] is not None else 0.0,
+            "主结果价格": row["yes_price"] if row["yes_price"] is not None else 0.0,
+            "对手结果价格": row["no_price"] if row["no_price"] is not None else 0.0,
         }
         for row in history
     ]
     st.line_chart(
         chart_history,
         x="时间",
-        y=["是价格", "否价格"],
+        y=["主结果价格", "对手结果价格"],
         width="stretch",
     )
     st.dataframe(_display_rows(history), width="stretch", hide_index=True)
@@ -674,12 +690,19 @@ def _render_settlements(state: dict, ledger_path: Path) -> None:
 def _render_quality(state: dict) -> None:
     quality = state["quality"]
     st.subheader(_label("data_quality"))
-    columns = st.columns(5)
+    columns = st.columns(6)
     columns[0].metric(_label("markets"), f"{quality['market_count']:,}")
     columns[1].metric(_label("time_span"), f"{quality['snapshot_time_span_hours']:.2f}h")
     columns[2].metric(_label("candidates"), f"{quality['candidate_snapshot_count']:,}")
-    columns[3].metric(_label("missing_prices"), f"{quality['missing_price_snapshot_count']:,}")
-    columns[4].metric(_label("unmatched_trades"), f"{quality['paper_trades_missing_snapshots']:,}")
+    columns[3].metric(
+        _label("recent_missing_prices"),
+        f"{quality.get('recent_missing_price_snapshot_count', 0):,}",
+    )
+    columns[4].metric(
+        _label("latest_missing_prices"),
+        f"{quality.get('recent_missing_price_market_count', 0):,}",
+    )
+    columns[5].metric(_label("unmatched_trades"), f"{quality['paper_trades_missing_snapshots']:,}")
     st.dataframe(_display_rows(quality["markets"]), width="stretch", hide_index=True)
 
 
@@ -785,7 +808,7 @@ def _render_controls(
             )
             config_path = st.text_input(
                 _label("shadow_config_path"),
-                "shadow_config.json",
+                value="",
                 key="control-shadow-config",
             )
             live_config_path = st.text_input(

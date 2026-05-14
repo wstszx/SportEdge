@@ -31,3 +31,13 @@ def test_polymarket_auth_init_and_check_commands(tmp_path):
 
     assert main(["polymarket-auth", "init-config", "--config", str(config_path)]) == 0
     assert main(["polymarket-auth", "check", "--config", str(config_path)]) == 1
+
+
+def test_polymarket_auth_check_missing_config_reports_error(tmp_path, capsys):
+    missing_path = tmp_path / "missing_auth_config.json"
+
+    assert main(["polymarket-auth", "check", "--config", str(missing_path)]) == 2
+
+    captured = capsys.readouterr()
+    assert "polymarket-auth check failed" in captured.err
+    assert "Traceback" not in captured.err

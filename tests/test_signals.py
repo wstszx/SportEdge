@@ -37,7 +37,22 @@ def test_missing_prices_are_watch_only():
     signal = classify_market(market)
 
     assert signal.status == "watch"
-    assert "missing YES or NO price" in signal.reasons
+    assert "missing market prices" in signal.reasons
+
+
+def test_named_binary_outcomes_are_not_reported_as_missing_prices():
+    market = make_market(
+        outcomes=[
+            MarketOutcome(name="Team A", price=0.46),
+            MarketOutcome(name="Team B", price=0.54),
+        ]
+    )
+
+    signal = classify_market(market)
+
+    assert signal.status == "watch"
+    assert "missing market prices" not in signal.reasons
+    assert signal.reasons == ["no fair probability supplied"]
 
 
 def test_wide_spread_is_watch_only():

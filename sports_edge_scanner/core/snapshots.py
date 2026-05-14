@@ -4,15 +4,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from sports_edge_scanner.core.outcomes import binary_outcome_sides
 from sports_edge_scanner.core.pricing import break_even_probability
 from sports_edge_scanner.models import Market, Signal
 
 
 def _price_for(market: Market, outcome_name: str) -> float | None:
-    wanted = outcome_name.upper()
-    for outcome in market.outcomes:
-        if outcome.name.upper() == wanted:
-            return outcome.price
+    sides = binary_outcome_sides(market)
+    if outcome_name.upper() == "YES":
+        return sides.yes_price
+    if outcome_name.upper() == "NO":
+        return sides.no_price
     return None
 
 
@@ -28,6 +30,7 @@ def market_snapshot_record(
     signal: Signal,
     timestamp: str | None = None,
 ) -> dict[str, Any]:
+    sides = binary_outcome_sides(market)
     return {
         "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
         "source": market.source,
@@ -39,8 +42,10 @@ def market_snapshot_record(
         "closed": market.closed,
         "liquidity": market.liquidity,
         "volume": market.volume,
-        "yes_price": _price_for(market, "YES"),
-        "no_price": _price_for(market, "NO"),
+        "yes_outcome_name": sides.yes_name,
+        "no_outcome_name": sides.no_name,
+        "yes_price": sides.yes_price,
+        "no_price": sides.no_price,
         "yes_break_even": _break_even_for(market, "YES"),
         "no_break_even": _break_even_for(market, "NO"),
         "signal_status": signal.status,

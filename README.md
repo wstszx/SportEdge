@@ -27,9 +27,15 @@ needed by the selected mode and then runs the matching workflow. In short, data
 fetching is 自动采集. Lower-level CLI commands still exist for tests and
 automation, but the normal operator workflow is the app mode switch.
 
+Launching the app also starts a background paper monitor by default. It keeps
+collecting market snapshots and running paper/shadow scans every 5 minutes while
+the app process is running, so the dashboard data continues to refresh without
+repeated button clicks. To launch the app without this background monitor, use
+`python -m sports_edge_scanner app --no-auto-monitor`.
+
 ## What The Scanner Reports
 
-- current YES/NO prices when available;
+- current market-side prices when available;
 - implied and break-even probabilities;
 - liquidity and spread warnings;
 - candidate signals only when model input clears the configured edge threshold;
@@ -128,9 +134,16 @@ authenticated writes.
 ## Advanced CLI
 
 The lower-level CLI commands such as `shadow scan`, `shadow watch`, `shadow
-report`, `live dry-run`, and `polymarket-auth check` remain available for tests,
-automation, and debugging. They are not the normal operator workflow. Start with:
+report`, `monitor paper`, `live dry-run`, and `polymarket-auth check` remain
+available for tests, automation, and debugging. They are not the normal operator
+workflow. Start with:
 
 ```bash
 python -m sports_edge_scanner app
+```
+
+For a standalone continuous paper monitor without the dashboard:
+
+```bash
+python -m sports_edge_scanner monitor paper
 ```

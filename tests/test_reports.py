@@ -185,12 +185,17 @@ def test_build_quality_report_summarizes_snapshot_coverage_and_missing_trade_mat
     assert report["market_count"] == 2
     assert report["candidate_snapshot_count"] == 1
     assert report["missing_price_snapshot_count"] == 1
+    assert report["latest_missing_price_market_count"] == 1
+    assert report["recent_snapshot_count"] == 1
+    assert report["recent_missing_price_snapshot_count"] == 0
+    assert report["recent_missing_price_market_count"] == 0
     assert report["paper_trade_count"] == 2
     assert report["paper_trades_missing_snapshots"] == 1
     assert report["snapshot_time_span_hours"] == pytest.approx(1.5)
     assert report["markets"][0]["market_id"] == "m1"
     assert report["markets"][0]["snapshot_count"] == 2
     assert report["markets"][0]["time_span_hours"] == pytest.approx(1.5)
+    assert report["markets"][1]["latest_missing_price"] is True
 
 
 def test_build_quality_report_handles_empty_inputs():
@@ -199,4 +204,37 @@ def test_build_quality_report_handles_empty_inputs():
     assert report["snapshot_count"] == 0
     assert report["market_count"] == 0
     assert report["snapshot_time_span_hours"] == 0.0
+    assert report["latest_missing_price_market_count"] == 0
+    assert report["recent_snapshot_count"] == 0
+    assert report["recent_missing_price_snapshot_count"] == 0
+    assert report["recent_missing_price_market_count"] == 0
     assert report["markets"] == []
+
+
+def test_build_quality_report_counts_recent_missing_prices_separately():
+    snapshots = [
+        {
+            "timestamp": "2026-05-09T00:00:00+00:00",
+            "market_id": "m1",
+            "title": "Market 1",
+            "signal_status": "watch",
+            "yes_price": 0.47,
+            "no_price": 0.53,
+        },
+        {
+            "timestamp": "2026-05-09T01:00:00+00:00",
+            "market_id": "m2",
+            "title": "Market 2",
+            "signal_status": "watch",
+            "yes_price": None,
+            "no_price": None,
+        },
+    ]
+
+    report = build_quality_report([], snapshots)
+
+    assert report["missing_price_snapshot_count"] == 1
+    assert report["latest_missing_price_market_count"] == 1
+    assert report["recent_snapshot_count"] == 1
+    assert report["recent_missing_price_snapshot_count"] == 1
+    assert report["recent_missing_price_market_count"] == 1

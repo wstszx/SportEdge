@@ -1,4 +1,5 @@
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -31,6 +32,14 @@ SPORT_KEYWORDS = {
     "tennis",
     "ufc",
     "world cup",
+}
+
+SPORT_KEYWORD_PATTERNS = {
+    keyword: re.compile(
+        rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])",
+        re.IGNORECASE,
+    )
+    for keyword in SPORT_KEYWORDS
 }
 
 
@@ -91,7 +100,7 @@ def is_sports_market(raw_market: dict[str, Any]) -> bool:
         " ".join(_tag_labels(raw_market)),
     ]
     searchable = " ".join(searchable_parts).lower()
-    return any(keyword in searchable for keyword in SPORT_KEYWORDS)
+    return any(pattern.search(searchable) for pattern in SPORT_KEYWORD_PATTERNS.values())
 
 
 def normalize_market(raw_market: dict[str, Any]) -> Market:

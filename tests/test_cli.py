@@ -2,11 +2,13 @@ import pytest
 
 from sports_edge_scanner.cli import (
     _app,
+    _monitor_paper,
     build_parser,
     fair_probabilities_for_market,
     market_snapshot,
     parse_fair_probability_args,
 )
+from sports_edge_scanner.core.events import read_events
 from sports_edge_scanner.models import Market, MarketOutcome
 
 
@@ -65,6 +67,28 @@ def test_market_snapshot_includes_generic_outcomes():
     ]
 
 
+def test_market_snapshot_uses_named_binary_outcomes_as_price_sides():
+    market = make_market()
+    named_market = Market(
+        **{
+            **market.__dict__,
+            "outcomes": [
+                MarketOutcome(name="OVER 5.5", price=0.635),
+                MarketOutcome(name="UNDER 5.5", price=0.365),
+            ],
+        }
+    )
+
+    snapshot = market_snapshot(named_market)
+
+    assert snapshot["yes_outcome_name"] == "OVER 5.5"
+    assert snapshot["no_outcome_name"] == "UNDER 5.5"
+    assert snapshot["yes_price"] == 0.635
+    assert snapshot["no_price"] == 0.365
+    assert snapshot["yes_break_even"] == pytest.approx(0.635)
+    assert snapshot["no_break_even"] == pytest.approx(0.365)
+
+
 def test_parser_supports_snapshot_collect_command():
     parser = build_parser()
 
@@ -96,6 +120,62 @@ def test_parser_supports_snapshot_watch_command():
     assert args.limit == 5
     assert args.iterations == 3
     assert args.interval_seconds == 1.0
+
+
+def test_parser_supports_monitor_paper_command():
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "monitor",
+            "paper",
+            "--limit",
+            "12",
+            "--interval-seconds",
+            "60",
+            "--snapshots",
+            "snapshots.jsonl",
+            "--events",
+            "shadow.jsonl",
+        ]
+    )
+
+    assert args.command == "monitor"
+    assert args.monitor_command == "paper"
+    assert args.limit == 12
+    assert args.interval_seconds == 60.0
+    assert args.snapshots == "snapshots.jsonl"
+    assert args.events == "shadow.jsonl"
+
+
+def test_monitor_paper_writes_iteration_error_event(monkeypatch, tmp_path):
+    class FailingMarketClient:
+        def fetch_markets(self, limit):
+            raise RuntimeError("temporary data failure")
+
+    monkeypatch.setattr("sports_edge_scanner.cli.PolymarketClient", FailingMarketClient)
+
+    parser = build_parser()
+    events_path = tmp_path / "shadow_events.jsonl"
+    snapshots_path = tmp_path / "market_snapshots.jsonl"
+    args = parser.parse_args(
+        [
+            "monitor",
+            "paper",
+            "--iterations",
+            "1",
+            "--events",
+            str(events_path),
+            "--snapshots",
+            str(snapshots_path),
+        ]
+    )
+
+    assert _monitor_paper(args) == 1
+    events = read_events(events_path)
+    assert events[0]["event_type"] == "monitor_iteration_error"
+    assert events[0]["iteration"] == 1
+    assert events[0]["error"] == "temporary data failure"
 
 
 def test_parser_supports_report_command():

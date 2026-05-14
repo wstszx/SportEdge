@@ -17,7 +17,7 @@ from sports_edge_scanner.connectors.polymarket_auth import (
     write_polymarket_auth_config_template,
 )
 from sports_edge_scanner.connectors.polymarket_clob import PolymarketCLOBClient
-from sports_edge_scanner.core.events import read_events
+from sports_edge_scanner.core.events import append_event, make_event, read_events
 from sports_edge_scanner.core.app_launcher import AppLaunchConfig, launch_app
 from sports_edge_scanner.core.execution import (
     DryRunExecutionClient,
@@ -30,8 +30,10 @@ from sports_edge_scanner.core.execution import (
     write_live_config_template,
 )
 from sports_edge_scanner.core.live_status import build_live_status
+from sports_edge_scanner.core.monitor import run_paper_monitor
 from sports_edge_scanner.core.auto_fair import AutoFairConfig
 from sports_edge_scanner.core.fair import load_fair_probability_book
+from sports_edge_scanner.core.outcomes import binary_outcome_sides
 from sports_edge_scanner.core.ledger import (
     append_record,
     paper_settlement_record,
@@ -104,10 +106,11 @@ def fair_probabilities_for_market(
 
 
 def _price_for(market: Market, outcome_name: str) -> float | None:
-    wanted = outcome_name.upper()
-    for outcome in market.outcomes:
-        if outcome.name.upper() == wanted:
-            return outcome.price
+    sides = binary_outcome_sides(market)
+    if outcome_name.upper() == "YES":
+        return sides.yes_price
+    if outcome_name.upper() == "NO":
+        return sides.no_price
     return None
 
 
@@ -119,14 +122,17 @@ def _break_even_for(market: Market, outcome_name: str) -> float | None:
 
 
 def market_snapshot(market: Market) -> dict[str, object]:
+    sides = binary_outcome_sides(market)
     return {
         "id": market.id,
         "title": market.title,
         "slug": market.slug,
         "liquidity": market.liquidity,
         "volume": market.volume,
-        "yes_price": _price_for(market, "YES"),
-        "no_price": _price_for(market, "NO"),
+        "yes_outcome_name": sides.yes_name,
+        "no_outcome_name": sides.no_name,
+        "yes_price": sides.yes_price,
+        "no_price": sides.no_price,
         "yes_break_even": _break_even_for(market, "YES"),
         "no_break_even": _break_even_for(market, "NO"),
         "outcomes": [
@@ -198,15 +204,21 @@ def _fetch_markets_and_signals(
 
 
 def _print_market_signal(market: Market, signal: Signal) -> None:
+    sides = binary_outcome_sides(market)
     yes_price = _price_for(market, "YES")
     no_price = _price_for(market, "NO")
     print(f"[{signal.status.upper()}] {market.title}")
     print(f"  Platform: {market.source}")
-    print(f"  YES price: {_format_price(yes_price)} | NO price: {_format_price(no_price)}")
+    yes_label = sides.yes_name or "YES"
+    no_label = sides.no_name or "NO"
+    print(
+        f"  {yes_label} price: {_format_price(yes_price)} | "
+        f"{no_label} price: {_format_price(no_price)}"
+    )
     print(
         "  Break-even: "
-        f"YES {_format_percent(_break_even_for(market, 'YES'))} | "
-        f"NO {_format_percent(_break_even_for(market, 'NO'))}"
+        f"{yes_label} {_format_percent(_break_even_for(market, 'YES'))} | "
+        f"{no_label} {_format_percent(_break_even_for(market, 'NO'))}"
     )
     print(f"  Liquidity: ${market.liquidity:,.2f} | Volume: ${market.volume:,.2f}")
     print(f"  Reasons: {', '.join(signal.reasons)}")
@@ -356,7 +368,11 @@ def _quality(args: argparse.Namespace) -> int:
     print(f"Markets: {report['market_count']}")
     print(f"Snapshot time span: {report['snapshot_time_span_hours']:.2f} hours")
     print(f"Candidate snapshots: {report['candidate_snapshot_count']}")
-    print(f"Snapshots missing YES/NO prices: {report['missing_price_snapshot_count']}")
+    print(f"Snapshots missing market prices: {report['missing_price_snapshot_count']}")
+    print(
+        "Latest markets missing prices: "
+        f"{report['latest_missing_price_market_count']}"
+    )
     print(f"Paper trades: {report['paper_trade_count']}")
     print(f"Paper trades missing snapshots: {report['paper_trades_missing_snapshots']}")
     if report["markets"]:
@@ -398,6 +414,11 @@ def _app(args: argparse.Namespace) -> int:
             host=args.host,
             port=args.port,
             open_browser=not args.no_browser,
+            auto_monitor=not args.no_auto_monitor,
+            monitor_limit=args.monitor_limit,
+            monitor_interval_seconds=args.monitor_interval_seconds,
+            snapshot_path=Path(args.snapshots),
+            shadow_events_path=Path(args.shadow_events),
         )
     )
 
@@ -520,6 +541,74 @@ def _shadow_watch(args: argparse.Namespace) -> int:
         print(f"Events: {result['events_path']}")
         _print_readiness(result.get("readiness", {}))
     return 0
+
+
+def _monitor_paper(args: argparse.Namespace) -> int:
+    market_client = PolymarketClient()
+    book_client = PolymarketCLOBClient()
+    events_path = Path(args.events)
+    snapshot_path = Path(args.snapshots)
+    risk_config = _load_risk_config(args.config)
+    fair_book = load_fair_probability_book(Path(args.fair)) if args.fair else None
+    auto_fair_config = AutoFairConfig(
+        min_confidence=args.auto_fair_min_confidence,
+    )
+
+    def collect_once() -> int:
+        markets = market_client.fetch_markets(limit=args.limit)
+        signals = [classify_market(market, {}) for market in markets]
+        count = append_snapshots(
+            snapshot_path,
+            [
+                market_snapshot_record(market, signal)
+                for market, signal in zip(markets, signals)
+            ],
+        )
+        print(f"monitor wrote {count} snapshot records to {snapshot_path}", flush=True)
+        return count
+
+    def scan_once() -> dict[str, object]:
+        summary = run_shadow_scan(
+            market_client=market_client,
+            book_client=book_client,
+            fair_book=fair_book,
+            risk_config=risk_config,
+            limit=args.limit,
+            events_path=events_path,
+            run_id=str(uuid4()),
+            auto_fair_config=auto_fair_config,
+        )
+        print(
+            "monitor shadow scan: "
+            f"markets={summary['markets']} "
+            f"candidates={summary['candidate_count']} "
+            f"accepted={summary['accepted_order_count']} "
+            f"rejected={summary['rejected_order_count']}",
+            flush=True,
+        )
+        return summary
+
+    try:
+        iterations = None if args.iterations <= 0 else args.iterations
+        result = run_paper_monitor(
+            collect_once=collect_once,
+            scan_once=scan_once,
+            iterations=iterations,
+            interval_seconds=args.interval_seconds,
+            on_error=lambda error: append_event(
+                events_path,
+                make_event("monitor_iteration_error", str(uuid4()), error),
+            ),
+        )
+    except KeyboardInterrupt:
+        return 0
+    except Exception as exc:
+        print(f"monitor paper failed: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["failed_iterations"] == 0 else 1
 
 
 def run_shadow_smoke(market_client, book_client, limit: int) -> dict[str, object]:
@@ -757,12 +846,16 @@ def _polymarket_auth_init_config(args: argparse.Namespace) -> int:
 def _polymarket_auth_check(args: argparse.Namespace) -> int:
     try:
         config = load_polymarket_auth_config(Path(args.config))
-        provider = EnvironmentPolymarketCredentialProvider(config)
-        provider.load()
-        credential_status = "present"
+    except Exception as exc:
+        print(f"polymarket-auth check failed: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        EnvironmentPolymarketCredentialProvider(config).load()
     except Exception:
         credential_status = "missing"
-        config = load_polymarket_auth_config(Path(args.config))
+    else:
+        credential_status = "present"
     payload = {
         "enabled": config.enabled,
         "allow_live_writes": config.allow_live_writes,
@@ -879,6 +972,10 @@ def build_parser() -> argparse.ArgumentParser:
     app.add_argument("--port", type=int, default=8501)
     app.add_argument("--no-browser", action="store_true")
     app.add_argument("--live", action="store_true")
+    app.add_argument("--no-auto-monitor", action="store_true")
+    app.add_argument("--monitor-limit", type=int, default=20)
+    app.add_argument("--monitor-interval-seconds", type=float, default=300.0)
+    app.add_argument("--snapshots", default="market_snapshots.jsonl")
     app.add_argument("--shadow-watch", action="store_true")
     app.add_argument("--watch-limit", type=int, default=20)
     app.add_argument("--watch-iterations", type=int, default=20)
@@ -889,6 +986,32 @@ def build_parser() -> argparse.ArgumentParser:
     app.add_argument("--auto-fair-min-confidence", type=float, default=0.75)
     app.add_argument("--json", action="store_true")
     app.set_defaults(func=_app)
+
+    monitor = subparsers.add_parser(
+        "monitor",
+        help="Run continuous background data collection and paper scans.",
+    )
+    monitor_subparsers = monitor.add_subparsers(dest="monitor_command", required=True)
+
+    monitor_paper = monitor_subparsers.add_parser(
+        "paper",
+        help="Continuously collect market data and run paper/shadow scans.",
+    )
+    monitor_paper.add_argument("--limit", type=int, default=20)
+    monitor_paper.add_argument("--interval-seconds", type=float, default=300.0)
+    monitor_paper.add_argument(
+        "--iterations",
+        type=int,
+        default=0,
+        help="Number of iterations. 0 means run until stopped.",
+    )
+    monitor_paper.add_argument("--snapshots", default="market_snapshots.jsonl")
+    monitor_paper.add_argument("--events", default="shadow_events.jsonl")
+    monitor_paper.add_argument("--fair", default="", help="Fair probability JSON file.")
+    monitor_paper.add_argument("--config", default="", help="Risk config JSON file.")
+    monitor_paper.add_argument("--auto-fair-min-confidence", type=float, default=0.75)
+    monitor_paper.add_argument("--json", action="store_true")
+    monitor_paper.set_defaults(func=_monitor_paper)
 
     shadow = subparsers.add_parser("shadow", help="Run shadow trading simulations.")
     shadow_subparsers = shadow.add_subparsers(dest="shadow_command", required=True)

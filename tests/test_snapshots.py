@@ -53,6 +53,37 @@ def test_market_snapshot_record_captures_prices_break_even_and_signal_status():
     assert record["signal_reasons"] == ["no fair probability supplied"]
 
 
+def test_market_snapshot_record_captures_prices_for_named_binary_outcomes():
+    market = Market(
+        id="market-2",
+        title="Team A vs Team B",
+        slug="team-a-vs-team-b",
+        active=True,
+        closed=False,
+        end_time=None,
+        liquidity=1500.0,
+        volume=3000.0,
+        outcomes=[
+            MarketOutcome(name="Team A", price=0.46, token_id="team-a-token"),
+            MarketOutcome(name="Team B", price=0.54, token_id="team-b-token"),
+        ],
+        source="polymarket",
+    )
+
+    record = market_snapshot_record(
+        market,
+        make_signal(),
+        timestamp="2026-05-09T00:00:00+00:00",
+    )
+
+    assert record["yes_outcome_name"] == "Team A"
+    assert record["no_outcome_name"] == "Team B"
+    assert record["yes_price"] == 0.46
+    assert record["no_price"] == 0.54
+    assert record["yes_break_even"] == 0.46
+    assert record["no_break_even"] == 0.54
+
+
 def test_append_snapshots_writes_jsonl_and_read_snapshots_loads_it(tmp_path):
     path = tmp_path / "snapshots.jsonl"
     record = market_snapshot_record(

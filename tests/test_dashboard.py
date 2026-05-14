@@ -263,8 +263,8 @@ def test_dashboard_display_rows_keep_missing_numeric_values_arrow_safe():
         ]
     )
 
-    assert rows[0]["是价格"] == 0.47
-    assert rows[1]["是价格"] is None
+    assert rows[0]["主结果价格"] == 0.47
+    assert rows[1]["主结果价格"] is None
     assert rows[0]["原因"] == "买卖价差过大"
     assert rows[1]["原因"] == "流动性不足, 买卖价差过大"
 
@@ -283,6 +283,13 @@ def test_control_defaults_inherit_sidebar_live_config_paths():
     assert defaults["execution_events_path"] == "custom_execution.jsonl"
     assert defaults["live_config_path"] == "configs/live.prod.json"
     assert defaults["auth_config_path"] == "configs/polymarket.prod.json"
+
+
+def test_dashboard_control_uses_empty_shadow_config_default():
+    source = Path("dashboard_app.py").read_text(encoding="utf-8")
+
+    assert 'key="control-shadow-config"' in source
+    assert 'value=""' in source
 
 
 def test_build_shadow_watch_args_maps_ui_values():
@@ -436,6 +443,30 @@ def test_run_dashboard_mode_paper_fetches_data_then_runs_paper_only():
     ]
     assert result["paper_exit_code"] == 0
     assert result["live_exit_code"] is None
+
+
+def test_run_dashboard_mode_uses_default_risk_config_when_shadow_config_omitted():
+    calls = []
+
+    def snapshot_runner(args):
+        return 0
+
+    def shadow_runner(args):
+        calls.append(args.config)
+        return 0
+
+    result = run_dashboard_mode(
+        mode=RUN_MODE_PAPER,
+        snapshot_path="market_snapshots.jsonl",
+        shadow_events_path="shadow_events.jsonl",
+        execution_events_path="execution_events.jsonl",
+        shadow_config_path="",
+        snapshot_runner=snapshot_runner,
+        shadow_runner=shadow_runner,
+    )
+
+    assert result["success"] is True
+    assert calls == [""]
 
 
 def test_run_dashboard_mode_live_fetches_data_then_runs_live_only():

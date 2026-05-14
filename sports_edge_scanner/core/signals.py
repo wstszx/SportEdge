@@ -1,6 +1,7 @@
 from typing import Optional
 
 from sports_edge_scanner.core.kelly import fractional_kelly
+from sports_edge_scanner.core.outcomes import binary_outcome_sides
 from sports_edge_scanner.core.pricing import break_even_probability, expected_value_per_unit
 from sports_edge_scanner.models import Market, MarketOutcome, Signal
 
@@ -35,14 +36,15 @@ def classify_market(
             source=market.source,
         )
 
-    yes = _find_outcome(market, "YES")
-    no = _find_outcome(market, "NO")
+    sides = binary_outcome_sides(market)
+    yes = sides.yes
+    no = sides.no
     if yes is None or no is None or yes.price is None or no.price is None:
         return Signal(
             market_id=market.id,
             title=market.title,
             status="watch",
-            reasons=["missing YES or NO price"],
+            reasons=["missing market prices"],
             source=market.source,
         )
 

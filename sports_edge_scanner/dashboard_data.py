@@ -28,6 +28,8 @@ def latest_market_rows(snapshots: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "title": snapshot.get("title"),
             "slug": snapshot.get("slug"),
             "timestamp": snapshot.get("timestamp"),
+            "yes_outcome_name": snapshot.get("yes_outcome_name") or "YES",
+            "no_outcome_name": snapshot.get("no_outcome_name") or "NO",
             "yes_price": snapshot.get("yes_price"),
             "no_price": snapshot.get("no_price"),
             "liquidity": snapshot.get("liquidity"),
@@ -53,6 +55,8 @@ def price_history_for_market(
     rows = [
         {
             "timestamp": snapshot.get("timestamp"),
+            "yes_outcome_name": snapshot.get("yes_outcome_name") or "YES",
+            "no_outcome_name": snapshot.get("no_outcome_name") or "NO",
             "yes_price": snapshot.get("yes_price"),
             "no_price": snapshot.get("no_price"),
             "liquidity": snapshot.get("liquidity"),

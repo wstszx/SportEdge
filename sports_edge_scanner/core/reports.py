@@ -46,6 +46,10 @@ def _mark_price(snapshot: dict[str, Any], side: str) -> float | None:
     return float(value)
 
 
+def _has_missing_prices(snapshot: dict[str, Any]) -> bool:
+    return snapshot.get("yes_price") is None or snapshot.get("no_price") is None
+
+
 def _is_trade_record(record: dict[str, Any]) -> bool:
     return record.get("type", "trade") == "trade"
 
@@ -174,6 +178,7 @@ def build_quality_report(
     trade_records = [record for record in paper_records if _is_trade_record(record)]
     snapshots_by_market: dict[str, list[dict[str, Any]]] = {}
     all_timestamps: list[datetime] = []
+    latest_timestamp: datetime | None = None
     candidate_count = 0
     missing_price_count = 0
 
@@ -187,13 +192,16 @@ def build_quality_report(
         timestamp = _parse_timestamp(snapshot.get("timestamp"))
         if timestamp is not None:
             all_timestamps.append(timestamp)
+            if latest_timestamp is None or timestamp > latest_timestamp:
+                latest_timestamp = timestamp
 
         if snapshot.get("signal_status") == "candidate":
             candidate_count += 1
-        if snapshot.get("yes_price") is None or snapshot.get("no_price") is None:
+        if _has_missing_prices(snapshot):
             missing_price_count += 1
 
     markets = []
+    latest_missing_price_market_count = 0
     for market_id, market_snapshots in snapshots_by_market.items():
         timestamps = [
             timestamp
@@ -204,6 +212,10 @@ def build_quality_report(
             if timestamp is not None
         ]
         first_snapshot = market_snapshots[0]
+        latest_snapshot = market_snapshots[-1]
+        latest_missing_price = _has_missing_prices(latest_snapshot)
+        if latest_missing_price:
+            latest_missing_price_market_count += 1
         markets.append(
             {
                 "market_id": market_id,
@@ -218,11 +230,26 @@ def build_quality_report(
                 "missing_price_snapshot_count": sum(
                     1
                     for snapshot in market_snapshots
-                    if snapshot.get("yes_price") is None
-                    or snapshot.get("no_price") is None
+                    if _has_missing_prices(snapshot)
                 ),
+                "latest_missing_price": latest_missing_price,
             }
         )
+
+    recent_snapshots = [
+        snapshot
+        for snapshot in snapshots
+        if latest_timestamp is not None
+        and _parse_timestamp(snapshot.get("timestamp")) == latest_timestamp
+    ]
+    recent_missing_snapshots = [
+        snapshot for snapshot in recent_snapshots if _has_missing_prices(snapshot)
+    ]
+    recent_missing_market_ids = {
+        str(snapshot.get("market_id"))
+        for snapshot in recent_missing_snapshots
+        if snapshot.get("market_id")
+    }
 
     markets.sort(key=lambda row: (-int(row["snapshot_count"]), str(row["market_id"])))
     snapshot_market_ids = set(snapshots_by_market)
@@ -238,6 +265,10 @@ def build_quality_report(
         "snapshot_time_span_hours": _time_span_hours(all_timestamps),
         "candidate_snapshot_count": candidate_count,
         "missing_price_snapshot_count": missing_price_count,
+        "latest_missing_price_market_count": latest_missing_price_market_count,
+        "recent_snapshot_count": len(recent_snapshots),
+        "recent_missing_price_snapshot_count": len(recent_missing_snapshots),
+        "recent_missing_price_market_count": len(recent_missing_market_ids),
         "paper_trade_count": len(trade_records),
         "paper_trades_missing_snapshots": len(missing_trades),
         "markets": markets,
