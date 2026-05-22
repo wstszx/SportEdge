@@ -117,3 +117,30 @@ def test_shadow_report_includes_strategy_diagnostics():
 
     assert report["strategy_diagnostics"]["status"] == "collecting_data"
     assert "collect more shadow runs" in report["strategy_diagnostics"]["next_actions"]
+
+
+def test_shadow_report_includes_strategy_funnel():
+    report = build_shadow_report(
+        [
+            {
+                "event_type": "orderbook_snapshot",
+                "token_id": "t1",
+                "bids": [{"price": 0.50, "size": 100}],
+                "asks": [{"price": 0.52, "size": 100}],
+            },
+            {
+                "event_type": "model_estimate",
+                "token_id": "t1",
+                "market_id": "m1",
+                "market_slug": "market-1",
+                "outcome_name": "YES",
+                "probability": 0.55,
+                "usable": True,
+            },
+        ]
+    )
+
+    assert report["strategy_funnel"]["min_edge_sensitivity"][0] == {
+        "min_edge": 0.03,
+        "candidate_count": 1,
+    }

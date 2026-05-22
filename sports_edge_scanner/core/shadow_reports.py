@@ -3,6 +3,7 @@ from typing import Any
 from sports_edge_scanner.core.shadow_readiness import evaluate_shadow_readiness
 from sports_edge_scanner.core.shadow_state import build_shadow_state
 from sports_edge_scanner.core.strategy_diagnostics import evaluate_strategy_diagnostics
+from sports_edge_scanner.core.strategy_funnel import build_strategy_funnel_diagnostics
 
 
 def _warnings(state: dict[str, Any]) -> list[str]:
@@ -28,4 +29,5 @@ def build_shadow_report(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
     report["readiness"] = evaluate_shadow_readiness(report)
     report["strategy_diagnostics"] = evaluate_strategy_diagnostics(report)
+    report["strategy_funnel"] = build_strategy_funnel_diagnostics(events)
     return report

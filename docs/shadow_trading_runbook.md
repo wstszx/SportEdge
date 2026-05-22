@@ -79,6 +79,16 @@ probabilities have not been independently validated.
 
 ## Advanced CLI
 
-Lower-level commands such as `shadow smoke`, `shadow scan`, `shadow watch`, and
-`shadow report` remain available for tests and automation. They are not the
-normal operator workflow.
+Lower-level commands such as `shadow smoke`, `shadow scan`, `shadow watch`,
+`shadow report`, and `shadow diagnose` remain available for tests and
+automation. They are not the normal operator workflow.
+
+Use `shadow diagnose` before relaxing strategy thresholds:
+
+```bash
+python -m sports_edge_scanner shadow diagnose --json
+```
+
+It reads `shadow_events.jsonl` and reports min-edge sensitivity, estimate-to-ask
+edge summaries, model rejection reasons, and the primary blockers that explain
+why model estimates did or did not become candidate orders.

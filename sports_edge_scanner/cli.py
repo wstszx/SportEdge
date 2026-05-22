@@ -47,6 +47,10 @@ from sports_edge_scanner.core.shadow_config import write_shadow_config_templates
 from sports_edge_scanner.core.shadow_pipeline import run_shadow_scan
 from sports_edge_scanner.core.shadow_reports import build_shadow_report
 from sports_edge_scanner.core.shadow_watch import run_shadow_watch
+from sports_edge_scanner.core.strategy_funnel import (
+    DEFAULT_MIN_EDGES,
+    build_strategy_funnel_diagnostics,
+)
 from sports_edge_scanner.core.signals import classify_market
 from sports_edge_scanner.core.snapshots import (
     append_snapshots,
@@ -480,6 +484,51 @@ def _shadow_report(args: argparse.Namespace) -> int:
         print(f"Simulated notional filled: ${report['simulated_notional_filled']:,.2f}")
         print(f"Average slippage: {report['average_slippage']:.4f}")
         _print_readiness(report["readiness"])
+    return 0
+
+
+def _parse_min_edges(value: str) -> list[float]:
+    if not value:
+        return DEFAULT_MIN_EDGES
+    min_edges: list[float] = []
+    for raw_part in value.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        min_edge = float(part)
+        if min_edge < 0.0:
+            raise ValueError("min edge must be non-negative")
+        min_edges.append(min_edge)
+    if not min_edges:
+        raise ValueError("at least one min edge is required")
+    return min_edges
+
+
+def _shadow_diagnose(args: argparse.Namespace) -> int:
+    try:
+        diagnostics = build_strategy_funnel_diagnostics(
+            read_events(Path(args.events)),
+            min_edges=_parse_min_edges(args.min_edges),
+        )
+    except ValueError as exc:
+        print(f"shadow diagnose failed: {exc}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(diagnostics, indent=2, sort_keys=True))
+    else:
+        print(f"Model estimates: {diagnostics['model_estimate_count']}")
+        print(f"Usable estimates: {diagnostics['usable_model_estimate_count']}")
+        print(
+            "Usable estimates with orderbook: "
+            f"{diagnostics['estimates_with_orderbook_count']}"
+        )
+        print("Min-edge sensitivity:")
+        for item in diagnostics["min_edge_sensitivity"]:
+            print(f"  {item['min_edge']:.2%}: {item['candidate_count']} candidates")
+        blockers = diagnostics.get("primary_blockers") or []
+        if blockers:
+            print(f"Primary blockers: {', '.join(str(blocker) for blocker in blockers)}")
     return 0
 
 
@@ -1035,6 +1084,15 @@ def build_parser() -> argparse.ArgumentParser:
     shadow_report.add_argument("--events", default="shadow_events.jsonl")
     shadow_report.add_argument("--json", action="store_true")
     shadow_report.set_defaults(func=_shadow_report)
+
+    shadow_diagnose = shadow_subparsers.add_parser(
+        "diagnose",
+        help="Explain why shadow estimates do or do not become candidate orders.",
+    )
+    shadow_diagnose.add_argument("--events", default="shadow_events.jsonl")
+    shadow_diagnose.add_argument("--min-edges", default="0.03,0.02,0.01")
+    shadow_diagnose.add_argument("--json", action="store_true")
+    shadow_diagnose.set_defaults(func=_shadow_diagnose)
 
     shadow_watch = shadow_subparsers.add_parser(
         "watch",

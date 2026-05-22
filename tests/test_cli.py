@@ -3,6 +3,7 @@ import pytest
 from sports_edge_scanner.cli import (
     _app,
     _monitor_paper,
+    _shadow_diagnose,
     build_parser,
     fair_probabilities_for_market,
     market_snapshot,
@@ -146,6 +147,63 @@ def test_parser_supports_monitor_paper_command():
     assert args.interval_seconds == 60.0
     assert args.snapshots == "snapshots.jsonl"
     assert args.events == "shadow.jsonl"
+
+
+def test_parser_supports_shadow_diagnose_command():
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "shadow",
+            "diagnose",
+            "--events",
+            "shadow.jsonl",
+            "--min-edges",
+            "0.03,0.02,0.01",
+            "--json",
+        ]
+    )
+
+    assert args.command == "shadow"
+    assert args.shadow_command == "diagnose"
+    assert args.events == "shadow.jsonl"
+    assert args.min_edges == "0.03,0.02,0.01"
+    assert args.json is True
+
+
+def test_shadow_diagnose_prints_json_report(tmp_path, capsys):
+    events_path = tmp_path / "shadow_events.jsonl"
+    events_path.write_text(
+        "\n".join(
+            [
+                '{"event_type":"orderbook_snapshot","token_id":"t1",'
+                '"bids":[{"price":0.50,"size":100}],'
+                '"asks":[{"price":0.52,"size":100}]}',
+                '{"event_type":"model_estimate","token_id":"t1","market_id":"m1",'
+                '"market_slug":"market-1","outcome_name":"YES","probability":0.55,'
+                '"usable":true,"reasons":["usable automatic estimate"]}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "shadow",
+            "diagnose",
+            "--events",
+            str(events_path),
+            "--min-edges",
+            "0.03,0.02",
+            "--json",
+        ]
+    )
+
+    assert _shadow_diagnose(args) == 0
+    output = capsys.readouterr().out
+    assert '"candidate_count": 1' in output
+    assert '"min_edge": 0.03' in output
 
 
 def test_monitor_paper_writes_iteration_error_event(monkeypatch, tmp_path):

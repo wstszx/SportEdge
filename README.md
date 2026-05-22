@@ -134,9 +134,12 @@ authenticated writes.
 ## Advanced CLI
 
 The lower-level CLI commands such as `shadow scan`, `shadow watch`, `shadow
-report`, `monitor paper`, `live dry-run`, and `polymarket-auth check` remain
-available for tests, automation, and debugging. They are not the normal operator
-workflow. Start with:
+report`, `shadow diagnose`, `monitor paper`, `live dry-run`, and
+`polymarket-auth check` remain available for tests, automation, and debugging.
+They are not the normal operator workflow. Use `shadow diagnose` when the event
+log has model estimates but no candidate orders; it reports min-edge sensitivity,
+top estimate-to-ask gaps, and the main blockers before changing strategy
+thresholds. Start with:
 
 ```bash
 python -m sports_edge_scanner app

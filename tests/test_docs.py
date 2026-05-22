@@ -11,6 +11,7 @@ def test_shadow_trading_runbook_contains_core_commands_and_boundary():
     assert "纸面+实盘" in text
     assert "实盘执行" in text
     assert "shadow smoke" in text
+    assert "shadow diagnose" in text
     assert "does not place real orders unless" in text
 
 
@@ -24,6 +25,7 @@ def test_readme_documents_frontend_run_mode_switching():
     assert "自动采集" in text
     assert "background paper monitor" in text
     assert "monitor paper" in text
+    assert "shadow diagnose" in text
     assert "same signal, risk, and order-generation pipeline" in text
     assert "paper mode" in text
     assert "allow_live_writes" in text
